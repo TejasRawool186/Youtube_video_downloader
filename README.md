@@ -28,7 +28,7 @@ A modern GUI application for downloading YouTube videos and playlists, built wit
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/youtube-downloader.git
+git clone https://github.com/TejasRawool186/Youtube_video_downloader.git
 ```
 
 2. **Create and activate virtual environment(optional)**
