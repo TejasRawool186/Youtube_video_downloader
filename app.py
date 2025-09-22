@@ -70,35 +70,41 @@ def generate_qr_code(url):
 
 def resolve_base_url() -> str:
     """Get the base URL for downloads, preferring LAN IP for QR codes"""
+    from flask import has_request_context
+    
     try:
-        # When called from a request context
-        host = request.host.split(":")[0]
-        port = request.host.split(":")[1] if ":" in request.host else "5000"
-        scheme = "https" if request.is_secure else "http"
-        
-        # If localhost/127.0.0.1, try to get actual LAN IP for QR codes
-        if host in ("127.0.0.1", "localhost"):
+        # Only use request context if it's available
+        if has_request_context():
+            host = request.host.split(":")[0]
+            port = request.host.split(":")[1] if ":" in request.host else "5000"
+            scheme = "https" if request.is_secure else "http"
+            
+            # If localhost/127.0.0.1, try to get actual LAN IP for QR codes
+            if host in ("127.0.0.1", "localhost"):
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.connect(("8.8.8.8", 80))
+                    ip = s.getsockname()[0]
+                    s.close()
+                    return f"{scheme}://{ip}:{port}/"
+                except Exception:
+                    pass
+            
+            return request.host_url
+        else:
+            # When called outside request context (like in background thread)
+            # Try to determine the IP address that would be accessible from other devices
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 s.connect(("8.8.8.8", 80))
                 ip = s.getsockname()[0]
                 s.close()
-                return f"{scheme}://{ip}:{port}/"
+                return f"http://{ip}:5000/"
             except Exception:
-                pass
-        
-        return request.host_url
-    except RuntimeError:
-        # When called outside request context (like in background thread)
-        # Try to determine the IP address that would be accessible from other devices
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return f"http://{ip}:5000/"
-        except Exception:
-            return "http://localhost:5000/"
+                return "http://localhost:5000/"
+    except Exception:
+        # Fallback for any other issues
+        return "http://localhost:5000/"
 
 
 def get_format_selector(kind: str, resolution: Optional[str]) -> str:
@@ -813,4 +819,12 @@ def static_files(filename):
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # Set Flask app configuration for local development
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
+    
+    # Run the app
+    print("Starting YouTube Downloader...")
+    print("Access the app at: http://localhost:5000")
+    print("Make sure FFmpeg is installed or placed in resources/ffmpeg/bin/")
+    
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
