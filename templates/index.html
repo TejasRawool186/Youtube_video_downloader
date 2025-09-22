@@ -265,6 +265,27 @@ d('#resetBtn').addEventListener('click', () => {
 
 // Theme is fixed to dark mode
 
+// Optimized resolution options - only useful values
+const getOptimizedResolutions = (availableResolutions) => {
+  const preferredResolutions = ['4320p', '2160p', '1440p', '1080p', '720p', '480p', '360p', '240p', '144p'];
+  const available = availableResolutions || [];
+  
+  // Filter to only include resolutions that are both preferred and available
+  const filtered = preferredResolutions.filter(res => 
+    available.some(avail => avail.includes(res.replace('p', '')))
+  );
+  
+  // If no matches, fall back to original available resolutions, but filter out very small ones
+  if (filtered.length === 0) {
+    return available.filter(res => {
+      const height = parseInt(res);
+      return height >= 144; // Only include 144p and above
+    });
+  }
+  
+  return filtered;
+};
+
 const setVideoMeta = (v) => {
   d('#videoMeta').classList.remove('d-none');
   d('#playlistMeta').classList.add('d-none');
@@ -274,7 +295,8 @@ const setVideoMeta = (v) => {
   d('#duration').textContent = v.duration ? `• ${secondsToHms(v.duration)}` : '';
   const resSel = d('#resolution');
   resSel.innerHTML = '';
-  (v.resolutions || ['360p','480p','720p']).forEach(r => {
+  const optimizedRes = getOptimizedResolutions(v.resolutions);
+  (optimizedRes.length > 0 ? optimizedRes : ['1080p', '720p', '480p', '360p']).forEach(r => {
     const opt = document.createElement('option');
     opt.value = r; opt.textContent = r; resSel.appendChild(opt);
   });
@@ -305,7 +327,11 @@ const setPlaylistMeta = (pl) => {
   });
   const resSel = d('#plResolution');
   resSel.innerHTML='';
-  (Array.from(commonRes).sort((a,b)=>parseInt(a)-parseInt(b)) || ['360p','480p','720p']).forEach(r => {
+  const allResolutions = Array.from(commonRes);
+  const optimizedRes = getOptimizedResolutions(allResolutions);
+  const sortedRes = (optimizedRes.length > 0 ? optimizedRes : allResolutions.filter(r => parseInt(r) >= 144))
+    .sort((a,b) => parseInt(b) - parseInt(a)); // Sort descending (highest quality first)
+  (sortedRes.length > 0 ? sortedRes : ['1080p','720p','480p','360p']).forEach(r => {
     const opt = document.createElement('option'); opt.value=r; opt.textContent=r; resSel.appendChild(opt);
   });
   d('#selectAll').checked = false;
