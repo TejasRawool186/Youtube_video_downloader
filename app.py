@@ -365,6 +365,10 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
                     'key': 'FFmpegVideoConvertor',
                     'preferedformat': 'mp4'
                 }]
+                # Add movflags for better compatibility
+                ydl_opts['postprocessor_args'] = {
+                    'ffmpeg': ['-movflags', '+faststart']
+                }
             else:
                 logger.warning("FFmpeg not available - using single-file formats to avoid merge issues")
                 # Adjust format selector to prefer single-file formats when FFmpeg is missing
@@ -381,11 +385,20 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
                 'preferredquality': '192',
             }]
         
-        if FFMPEG_DIR:
-            ydl_opts['ffmpeg_location'] = FFMPEG_DIR
-            logger.info(f"Using FFmpeg from: {FFMPEG_DIR}")
+        # Explicit FFmpeg configuration to prevent corruption
+        ffmpeg_path = ffmpeg_bin('ffmpeg')
+        ffprobe_path = ffmpeg_bin('ffprobe')
+        
+        if ffmpeg_path and ffprobe_path:
+            ydl_opts['ffmpeg_location'] = os.path.dirname(ffmpeg_path)
+            # Ensure both ffmpeg and ffprobe are explicitly set
+            if FFMPEG_DIR:
+                ydl_opts['ffmpeg_location'] = FFMPEG_DIR
+            logger.info(f"Using FFmpeg from: {os.path.dirname(ffmpeg_path)}")
+            logger.info(f"FFmpeg binary: {ffmpeg_path}")
+            logger.info(f"FFprobe binary: {ffprobe_path}")
         else:
-            logger.warning("FFmpeg not found in resources/ffmpeg/bin or system PATH")
+            logger.warning("FFmpeg or FFprobe not found - video processing may fail")
         
         # Handle playlist selection - FIXED LOGIC
         if selection_ids:
@@ -464,14 +477,47 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
                 logger.warning(f"Error checking video stream in {path}: {e}")
                 return True  # Assume it's good if we can't check
         
-        # For video downloads, validate streams
+        # Enhanced validation for all downloads to prevent corruption
+        def validate_file_integrity(path: str) -> bool:
+            """Validate file integrity using ffprobe"""
+            try:
+                if not os.path.isfile(path) or os.path.getsize(path) == 0:
+                    return False
+                    
+                ffprobe = ffmpeg_bin('ffprobe')
+                if not ffprobe:
+                    return True  # Can't validate without ffprobe, assume good
+                
+                # Quick validation - check if file can be read by ffprobe
+                cmd = [ffprobe, '-v', 'quiet', '-print_format', 'json', '-show_format', path]
+                proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10, encoding='utf-8', errors='ignore')
+                
+                if proc.returncode != 0:
+                    logger.warning(f"File validation failed for {path}: {proc.stderr}")
+                    return False
+                    
+                return True
+            except Exception as e:
+                logger.warning(f"Error validating file {path}: {e}")
+                return True  # Assume good if we can't validate
+        
+        # For video downloads, validate streams and integrity
         if kind == 'mp4':
             valid_files = []
             for p in downloaded_files:
-                if has_proper_video_stream(p):
+                if has_proper_video_stream(p) and validate_file_integrity(p):
                     valid_files.append(p)
                 else:
-                    logger.warning(f"File {p} does not contain proper video stream")
+                    logger.warning(f"File {p} failed validation (corrupt or invalid streams)")
+            downloaded_files = valid_files
+        elif kind == 'mp3':
+            # Validate audio files
+            valid_files = []
+            for p in downloaded_files:
+                if validate_file_integrity(p):
+                    valid_files.append(p)
+                else:
+                    logger.warning(f"Audio file {p} failed validation (corrupt)")
             downloaded_files = valid_files
         
         # Determine if this is a playlist based on actual downloaded files
