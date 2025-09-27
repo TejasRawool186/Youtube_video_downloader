@@ -76,17 +76,17 @@ def ensure_cookiefile() -> Optional[str]:
             logger.info(f"Using YouTube cookie file from YOUTUBE_COOKIES_FILE: {COOKIEFILE}")
             return COOKIEFILE
 
-        # 2) mounted secret path (common pattern in Render)
-        mounted = "/etc/secrets/cookies.txt"
-        if os.path.isfile(mounted):
-            COOKIEFILE = mounted
-            logger.info(f"Using YouTube cookie file from mounted secret: {COOKIEFILE}")
+        # 2) cookies.txt in app directory (preferred for Render free tier)
+        app_cookie_path = os.path.join(PROJECT_ROOT, 'cookies.txt')
+        if os.path.isfile(app_cookie_path):
+            COOKIEFILE = app_cookie_path
+            logger.info(f"Using YouTube cookie file from app directory: {COOKIEFILE}")
             return COOKIEFILE
 
         # 3) cookie content in env var
         cookies_content = os.getenv('YOUTUBE_COOKIES')
         if cookies_content:
-            candidate = os.path.join(DOWNLOAD_ROOT, 'cookies.txt')
+            candidate = os.path.join(PROJECT_ROOT, 'cookies.txt')
             try:
                 write_needed = True
                 if os.path.isfile(candidate):
@@ -96,11 +96,9 @@ def ensure_cookiefile() -> Optional[str]:
                     if existing == cookies_content:
                         write_needed = False
                 if write_needed:
-                    # write atomically
-                    fd, tmp_path = tempfile.mkstemp(prefix='cookies_', dir=DOWNLOAD_ROOT, text=True)
+                    fd, tmp_path = tempfile.mkstemp(prefix='cookies_', dir=PROJECT_ROOT, text=True)
                     with os.fdopen(fd, 'w', encoding='utf-8') as tmpf:
                         tmpf.write(cookies_content)
-                    # move into place
                     shutil.move(tmp_path, candidate)
                     try:
                         os.chmod(candidate, 0o600)
@@ -113,7 +111,7 @@ def ensure_cookiefile() -> Optional[str]:
                 logger.exception(f"Failed to write cookies file from YOUTUBE_COOKIES: {e}")
                 return None
 
-        logger.info("No YouTube cookies configured (YOUTUBE_COOKIES_FILE, /etc/secrets/cookies.txt or YOUTUBE_COOKIES env var)")
+        logger.info("No YouTube cookies configured (YOUTUBE_COOKIES_FILE, cookies.txt in app directory, or YOUTUBE_COOKIES env var)")
         return None
     except Exception as e:
         logger.exception(f"ensure_cookiefile error: {e}")
