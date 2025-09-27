@@ -437,6 +437,7 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
             'sleep_interval': 0,  # Remove unnecessary delays
             'max_sleep_interval': 1,
             'sleep_interval_subtitles': 0,
+            'ffmpeg_location': '/usr/bin/ffmpeg',
         }
 
         # Attach cookiefile if available (no other behavior changed)
@@ -725,6 +726,7 @@ def get_metadata():
             'no_warnings': True,
             'extract_flat': True,
             'skip_download': True,
+            'ffmpeg_location': '/usr/bin/ffmpeg',
         }
 
         # Attach cookie file to metadata extraction as well
@@ -747,6 +749,7 @@ def get_metadata():
                                 'quiet': True,
                                 'no_warnings': True,
                                 'skip_download': True,
+                                'ffmpeg_location': '/usr/bin/ffmpeg',
                             }
                             # attach cookiefile to detailed extraction too
                             if cookiefile:
