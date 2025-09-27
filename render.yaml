@@ -1,0 +1,20 @@
+# Render configuration for resource-intensive Flask app
+services:
+  - type: web
+    name: ytstreamline-app
+    env: python
+    plan: starter # Use 'starter' for free, upgrade for more resources
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    autoDeploy: true
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: FFMPEG_PATH
+        value: "resources/ffmpeg/bin/ffmpeg.exe"
+      - key: YTDLP_PATH
+        value: "yt-dlp"
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
