@@ -21,6 +21,7 @@ import qrcode
 import logging
 import zipfile
 import subprocess
+import tempfile  # <-- used for safety if needed
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,6 +44,84 @@ if not FFMPEG_DIR:
     FFMPEG_PATH = shutil.which("ffmpeg")
     FFMPEG_DIR = os.path.dirname(FFMPEG_PATH) if FFMPEG_PATH else None
 
+# ----------------------------
+# Cookies support (minimal)
+# ----------------------------
+# How to provide cookies to the app:
+# 1) Mount a secret file: /etc/secrets/cookies.txt  (Render Secret Files)
+# 2) Set YOUTUBE_COOKIES_FILE environment variable to a path to an uploaded file
+# 3) Set YOUTUBE_COOKIES env var with the text content of cookies.txt (the code will write it to DOWNLOAD_ROOT/cookies.txt)
+#
+# The helper below will check these in order and return a cookiefile path or None.
+COOKIEFILE: Optional[str] = None
+
+def ensure_cookiefile() -> Optional[str]:
+    """
+    Ensure we have a cookies.txt file available for yt-dlp.
+    Priority:
+      1) YOUTUBE_COOKIES_FILE (path to file)
+      2) /etc/secrets/cookies.txt (mounted secret)
+      3) YOUTUBE_COOKIES (env var containing the cookies.txt contents) -> writes to DOWNLOAD_ROOT/cookies.txt
+    Returns path to cookie file or None.
+    """
+    global COOKIEFILE
+    if COOKIEFILE:
+        return COOKIEFILE
+
+    try:
+        # 1) explicit file path
+        env_file = os.getenv('YOUTUBE_COOKIES_FILE')
+        if env_file and os.path.isfile(env_file):
+            COOKIEFILE = env_file
+            logger.info(f"Using YouTube cookie file from YOUTUBE_COOKIES_FILE: {COOKIEFILE}")
+            return COOKIEFILE
+
+        # 2) mounted secret path (common pattern in Render)
+        mounted = "/etc/secrets/cookies.txt"
+        if os.path.isfile(mounted):
+            COOKIEFILE = mounted
+            logger.info(f"Using YouTube cookie file from mounted secret: {COOKIEFILE}")
+            return COOKIEFILE
+
+        # 3) cookie content in env var
+        cookies_content = os.getenv('YOUTUBE_COOKIES')
+        if cookies_content:
+            candidate = os.path.join(DOWNLOAD_ROOT, 'cookies.txt')
+            try:
+                write_needed = True
+                if os.path.isfile(candidate):
+                    # avoid rewriting if identical
+                    with open(candidate, 'r', encoding='utf-8', errors='ignore') as f:
+                        existing = f.read()
+                    if existing == cookies_content:
+                        write_needed = False
+                if write_needed:
+                    # write atomically
+                    fd, tmp_path = tempfile.mkstemp(prefix='cookies_', dir=DOWNLOAD_ROOT, text=True)
+                    with os.fdopen(fd, 'w', encoding='utf-8') as tmpf:
+                        tmpf.write(cookies_content)
+                    # move into place
+                    shutil.move(tmp_path, candidate)
+                    try:
+                        os.chmod(candidate, 0o600)
+                    except Exception:
+                        pass
+                    logger.info(f"Wrote cookies content to {candidate} from YOUTUBE_COOKIES env var")
+                COOKIEFILE = candidate
+                return COOKIEFILE
+            except Exception as e:
+                logger.exception(f"Failed to write cookies file from YOUTUBE_COOKIES: {e}")
+                return None
+
+        logger.info("No YouTube cookies configured (YOUTUBE_COOKIES_FILE, /etc/secrets/cookies.txt or YOUTUBE_COOKIES env var)")
+        return None
+    except Exception as e:
+        logger.exception(f"ensure_cookiefile error: {e}")
+        return None
+
+# ----------------------------
+# rest of existing helpers
+# ----------------------------
 
 def generate_qr_code(url):
     """Generate QR code as base64 data URL"""
@@ -361,6 +440,12 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
             'max_sleep_interval': 1,
             'sleep_interval_subtitles': 0,
         }
+
+        # Attach cookiefile if available (no other behavior changed)
+        cookiefile = ensure_cookiefile()
+        if cookiefile:
+            ydl_opts['cookiefile'] = cookiefile
+            logger.info(f"Using cookie file for job {job_id}: {cookiefile}")
         
         # For video downloads, ensure proper merging and MP4 output
         if kind == "mp4":
@@ -643,6 +728,12 @@ def get_metadata():
             'extract_flat': True,
             'skip_download': True,
         }
+
+        # Attach cookie file to metadata extraction as well
+        cookiefile = ensure_cookiefile()
+        if cookiefile:
+            ydl_opts['cookiefile'] = cookiefile
+            logger.info(f"Using cookie file for metadata extraction: {cookiefile}")
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -659,6 +750,9 @@ def get_metadata():
                                 'no_warnings': True,
                                 'skip_download': True,
                             }
+                            # attach cookiefile to detailed extraction too
+                            if cookiefile:
+                                detailed_ydl_opts['cookiefile'] = cookiefile
                             with yt_dlp.YoutubeDL(detailed_ydl_opts) as detail_ydl:
                                 detailed_info = detail_ydl.extract_info(entry.get('url', ''), download=False)
                                 
