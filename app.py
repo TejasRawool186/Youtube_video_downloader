@@ -21,7 +21,7 @@ import qrcode
 import logging
 import zipfile
 import subprocess
-import tempfile  # <-- used for safety if needed
+import tempfile
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,14 +45,8 @@ if not FFMPEG_DIR:
     FFMPEG_DIR = os.path.dirname(FFMPEG_PATH) if FFMPEG_PATH else None
 
 # ----------------------------
-# Cookies support (minimal)
+# Enhanced Cookies support
 # ----------------------------
-# How to provide cookies to the app:
-# 1) Mount a secret file: /etc/secrets/cookies.txt  (Render Secret Files)
-# 2) Set YOUTUBE_COOKIES_FILE environment variable to a path to an uploaded file
-# 3) Set YOUTUBE_COOKIES env var with the text content of cookies.txt (the code will write it to DOWNLOAD_ROOT/cookies.txt)
-#
-# The helper below will check these in order and return a cookiefile path or None.
 COOKIEFILE: Optional[str] = None
 
 def ensure_cookiefile() -> Optional[str]:
@@ -60,27 +54,29 @@ def ensure_cookiefile() -> Optional[str]:
     Ensure we have a cookies.txt file available for yt-dlp.
     Priority:
       1) YOUTUBE_COOKIES_FILE (path to file)
-      2) /etc/secrets/cookies.txt (mounted secret)
-      3) YOUTUBE_COOKIES (env var containing the cookies.txt contents) -> writes to DOWNLOAD_ROOT/cookies.txt
-    Returns path to cookie file or None.
+      2) cookies.txt in app directory
+      3) YOUTUBE_COOKIES (env var containing the cookies.txt contents)
+      4) cookies.txt in current working directory
     """
     global COOKIEFILE
-    if COOKIEFILE:
+    if COOKIEFILE and os.path.isfile(COOKIEFILE):
         return COOKIEFILE
 
     try:
-        # 1) explicit file path
+        logger.info("Looking for YouTube cookies...")
+        
+        # 1) explicit file path from environment
         env_file = os.getenv('YOUTUBE_COOKIES_FILE')
         if env_file and os.path.isfile(env_file):
             COOKIEFILE = env_file
-            logger.info(f"Using YouTube cookie file from YOUTUBE_COOKIES_FILE: {COOKIEFILE}")
+            logger.info(f"✓ Using YouTube cookie file from YOUTUBE_COOKIES_FILE: {COOKIEFILE}")
             return COOKIEFILE
 
-        # 2) cookies.txt in app directory (preferred for Render free tier)
+        # 2) cookies.txt in app directory
         app_cookie_path = os.path.join(PROJECT_ROOT, 'cookies.txt')
         if os.path.isfile(app_cookie_path):
             COOKIEFILE = app_cookie_path
-            logger.info(f"Using YouTube cookie file from app directory: {COOKIEFILE}")
+            logger.info(f"✓ Using YouTube cookie file from app directory: {COOKIEFILE}")
             return COOKIEFILE
 
         # 3) cookie content in env var
@@ -88,37 +84,36 @@ def ensure_cookiefile() -> Optional[str]:
         if cookies_content:
             candidate = os.path.join(PROJECT_ROOT, 'cookies.txt')
             try:
-                write_needed = True
-                if os.path.isfile(candidate):
-                    # avoid rewriting if identical
-                    with open(candidate, 'r', encoding='utf-8', errors='ignore') as f:
-                        existing = f.read()
-                    if existing == cookies_content:
-                        write_needed = False
-                if write_needed:
-                    fd, tmp_path = tempfile.mkstemp(prefix='cookies_', dir=PROJECT_ROOT, text=True)
-                    with os.fdopen(fd, 'w', encoding='utf-8') as tmpf:
-                        tmpf.write(cookies_content)
-                    shutil.move(tmp_path, candidate)
-                    try:
-                        os.chmod(candidate, 0o600)
-                    except Exception:
-                        pass
-                    logger.info(f"Wrote cookies content to {candidate} from YOUTUBE_COOKIES env var")
+                # Write cookies to file
+                with open(candidate, 'w', encoding='utf-8') as f:
+                    f.write(cookies_content)
+                # Set appropriate permissions
+                try:
+                    os.chmod(candidate, 0o600)
+                except Exception:
+                    pass
                 COOKIEFILE = candidate
+                logger.info(f"✓ Wrote cookies from YOUTUBE_COOKIES env var to: {candidate}")
                 return COOKIEFILE
             except Exception as e:
-                logger.exception(f"Failed to write cookies file from YOUTUBE_COOKIES: {e}")
-                return None
+                logger.error(f"✗ Failed to write cookies file from YOUTUBE_COOKIES: {e}")
 
-        logger.info("No YouTube cookies configured (YOUTUBE_COOKIES_FILE, cookies.txt in app directory, or YOUTUBE_COOKIES env var)")
+        # 4) cookies.txt in current working directory
+        cwd_cookie_path = os.path.join(os.getcwd(), 'cookies.txt')
+        if os.path.isfile(cwd_cookie_path):
+            COOKIEFILE = cwd_cookie_path
+            logger.info(f"✓ Using YouTube cookie file from current directory: {COOKIEFILE}")
+            return COOKIEFILE
+
+        logger.warning("✗ No YouTube cookies configured. Age-restricted videos will not be accessible.")
         return None
+        
     except Exception as e:
         logger.exception(f"ensure_cookiefile error: {e}")
         return None
 
 # ----------------------------
-# rest of existing helpers
+# Helper functions (unchanged)
 # ----------------------------
 
 def generate_qr_code(url):
@@ -144,19 +139,16 @@ def generate_qr_code(url):
         logger.error(f"Failed to generate QR code: {e}")
         return None
 
-
 def resolve_base_url() -> str:
     """Get the base URL for downloads, preferring LAN IP for QR codes"""
     from flask import has_request_context
     
     try:
-        # Only use request context if it's available
         if has_request_context():
             host = request.host.split(":")[0]
             port = request.host.split(":")[1] if ":" in request.host else "5000"
             scheme = "https" if request.is_secure else "http"
             
-            # If localhost/127.0.0.1, try to get actual LAN IP for QR codes
             if host in ("127.0.0.1", "localhost"):
                 try:
                     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -169,8 +161,6 @@ def resolve_base_url() -> str:
             
             return request.host_url
         else:
-            # When called outside request context (like in background thread)
-            # Try to determine the IP address that would be accessible from other devices
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 s.connect(("8.8.8.8", 80))
@@ -180,12 +170,10 @@ def resolve_base_url() -> str:
             except Exception:
                 return "http://localhost:5000/"
     except Exception:
-        # Fallback for any other issues
         return "http://localhost:5000/"
 
-
 def get_format_selector(kind: str, resolution: Optional[str]) -> str:
-    """Get yt-dlp format selector string - optimized for quality and performance"""
+    """Get yt-dlp format selector string"""
     if kind == "mp3":
         return "bestaudio[ext=m4a]/bestaudio[ext=aac]/bestaudio[ext=mp3]/bestaudio/best"
     
@@ -195,7 +183,6 @@ def get_format_selector(kind: str, resolution: Optional[str]) -> str:
         max_h = digits if digits else None
     
     if max_h:
-        # Enhanced format selection prioritizing video+audio combinations
         return (
             f"bestvideo[height<={max_h}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={max_h}][ext=mp4]+bestaudio[ext=aac]/"
             f"bestvideo[height<={max_h}][ext=webm]+bestaudio[ext=webm]/bestvideo[height<={max_h}][ext=webm]+bestaudio[ext=opus]/"
@@ -205,7 +192,6 @@ def get_format_selector(kind: str, resolution: Optional[str]) -> str:
             f"worst[height<={max_h}]/worst"
         )
     
-    # For best available quality with proper video+audio combination
     return (
         f"bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=aac]/"
         f"bestvideo[ext=webm]+bestaudio[ext=webm]/bestvideo[ext=webm]+bestaudio[ext=opus]/"
@@ -214,7 +200,6 @@ def get_format_selector(kind: str, resolution: Optional[str]) -> str:
         f"bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio[ext=aac]/"
         f"worst[ext=mp4]/worst"
     )
-
 
 def progress_hook(d, job_id):
     """Progress hook for yt-dlp downloads"""
@@ -229,7 +214,6 @@ def progress_hook(d, job_id):
         title = info.get('title')
         filename = d.get('filename')
         
-        # Initialize items structure for playlist tracking
         if 'items' not in job:
             job['items'] = {}
         if pl_index is not None:
@@ -244,7 +228,7 @@ def progress_hook(d, job_id):
             total = d.get('total_bytes') or d.get('total_bytes_estimate')
             if total and total > 0:
                 percentage = (downloaded / total)
-                job['progress'] = round(percentage * 100, 2)  # Convert to percentage (0-100)
+                job['progress'] = round(percentage * 100, 2)
             else:
                 job['progress'] = None
             job['status'] = 'downloading'
@@ -256,7 +240,7 @@ def progress_hook(d, job_id):
                 job['items'][int(pl_index)]['progress'] = round((d.get('downloaded_bytes', 0) / (total or 1)) * 100, 1) if total else None
                 job['items'][int(pl_index)]['status'] = 'downloading'
         elif status == 'finished':
-            job['progress'] = 100  # Set to 100% when finished
+            job['progress'] = 100
             job['status'] = 'processing'
             if filename:
                 job['produced_file'] = filename
@@ -270,7 +254,6 @@ def progress_hook(d, job_id):
             if pl_index is not None:
                 job['items'][int(pl_index)]['status'] = 'processing'
 
-
 def ffmpeg_bin(name: str) -> Optional[str]:
     """Resolve ffmpeg/ffprobe binaries."""
     if FFMPEG_DIR:
@@ -279,36 +262,20 @@ def ffmpeg_bin(name: str) -> Optional[str]:
             return candidate
     return shutil.which(name)
 
-
 def sanitize_filename(filename):
     """Remove or replace problematic characters from filenames"""
     import re
-    
-    # Replace problematic characters with underscores
     invalid_chars = '<>:"/\\|?*#!'
     for char in invalid_chars:
         filename = filename.replace(char, '_')
-    
-    # Remove or replace emojis and special Unicode characters
-    # Keep basic Latin, numbers, and common punctuation
     filename = re.sub(r'[^\w\s\-_\.\(\)\[\]]', '_', filename)
-    
-    # Remove multiple consecutive underscores
     filename = re.sub(r'_+', '_', filename)
-    
-    # Remove leading/trailing underscores and dots
     filename = filename.strip('_.')
-    
-    # Ensure filename is not empty
     if not filename:
         filename = 'video'
-    
-    # Limit length to avoid filesystem issues
     if len(filename) > 200:
         filename = filename[:200]
-    
     return filename
-
 
 def transcode_to_mp4(input_path: str, output_path: str) -> bool:
     """Transcode or remux an input file to MP4 with H.264 video and AAC audio."""
@@ -318,16 +285,13 @@ def transcode_to_mp4(input_path: str, output_path: str) -> bool:
             logger.error("FFmpeg not available for transcoding")
             return False
         
-        # Check if the input file exists and is readable
         if not os.path.isfile(input_path) or os.path.getsize(input_path) == 0:
             logger.error(f"Input file does not exist or is empty: {input_path}")
             return False
         
-        # Initialize variables to avoid reference before assignment
-        has_video = True  # Assume has video by default
-        has_audio = True  # Assume has audio by default
+        has_video = True
+        has_audio = True
             
-        # Use ffprobe to check streams more accurately
         ffprobe = ffmpeg_bin('ffprobe')
         if ffprobe:
             probe_cmd = [
@@ -347,19 +311,16 @@ def transcode_to_mp4(input_path: str, output_path: str) -> bool:
                         logger.error(f"Input file does not contain video stream: {input_path}")
                         return False
                         
-                    # Check if already in good format
                     video_codec = next((s.get('codec_name') for s in streams if s.get('codec_type') == 'video'), None)
                     audio_codec = next((s.get('codec_name') for s in streams if s.get('codec_type') == 'audio'), None)
                     
                     if video_codec == 'h264' and audio_codec == 'aac' and input_path.lower().endswith('.mp4'):
-                        # Already in good format, just copy
                         shutil.copy2(input_path, output_path)
                         return True
                         
                 except json.JSONDecodeError:
                     pass
         
-        # Improved transcoding command with better performance
         if has_audio:
             cmd = [ffmpeg, '-y', '-i', input_path, 
                    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 
@@ -369,7 +330,6 @@ def transcode_to_mp4(input_path: str, output_path: str) -> bool:
                    '-avoid_negative_ts', 'make_zero',
                    output_path]
         else:
-            # No audio stream
             cmd = [ffmpeg, '-y', '-i', input_path, 
                    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 
                    '-preset', 'faster', '-crf', '23',
@@ -378,7 +338,6 @@ def transcode_to_mp4(input_path: str, output_path: str) -> bool:
                    output_path]
         
         logger.info(f"Transcoding to MP4: {' '.join(cmd)}")
-        
         proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8', errors='ignore')
             
         if proc.returncode == 0 and os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
@@ -389,7 +348,6 @@ def transcode_to_mp4(input_path: str, output_path: str) -> bool:
     except Exception as e:
         logger.exception(f"Exception during MP4 transcode: {e}")
         return False
-
 
 def download_worker(job_id, url, kind, resolution, selection_ids):
     """Worker function for downloading videos with per-job directory"""
@@ -407,7 +365,7 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
         job_dir = os.path.join(DOWNLOAD_ROOT, job_id)
         os.makedirs(job_dir, exist_ok=True)
         
-        # Configure yt-dlp options with improved performance
+        # Configure yt-dlp options
         format_selector = get_format_selector(kind, resolution)
         
         ydl_opts = {
@@ -418,11 +376,11 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
             'prefer_ffmpeg': True,
             'prefer_free_formats': False,
             'continuedl': True,
-            'concurrent_fragment_downloads': 4,  # Improved performance
+            'concurrent_fragment_downloads': 4,
             'fragment_retries': 10,
             'retries': 10,
             'socket_timeout': 60,
-            'http_chunk_size': 1048576,  # 1MB chunks for better speed
+            'http_chunk_size': 1048576,
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
@@ -434,12 +392,12 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
             'fixup': 'detect_or_warn',
             'prefer_insecure': False,
             'geo_bypass': True,
-            'sleep_interval': 0,  # Remove unnecessary delays
+            'sleep_interval': 0,
             'max_sleep_interval': 1,
             'sleep_interval_subtitles': 0,
         }
 
-        # Attach cookiefile if available (no other behavior changed)
+        # Attach cookiefile if available
         cookiefile = ensure_cookiefile()
         if cookiefile:
             ydl_opts['cookiefile'] = cookiefile
@@ -449,18 +407,15 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
         if kind == "mp4":
             if FFMPEG_DIR or shutil.which('ffmpeg'):
                 ydl_opts['merge_output_format'] = 'mp4'
-                # Add postprocessor to ensure MP4 output
                 ydl_opts['postprocessors'] = [{
                     'key': 'FFmpegVideoConvertor',
                     'preferedformat': 'mp4'
                 }]
-                # Add movflags for better compatibility
                 ydl_opts['postprocessor_args'] = {
                     'ffmpeg': ['-movflags', '+faststart']
                 }
             else:
-                logger.warning("FFmpeg not available - using single-file formats to avoid merge issues")
-                # Adjust format selector to prefer single-file formats when FFmpeg is missing
+                logger.warning("FFmpeg not available - using single-file formats")
                 format_selector = (
                     f"best[ext=mp4]/best[ext=webm]/best/"
                     f"worst[ext=mp4]/worst[ext=webm]/worst"
@@ -474,32 +429,24 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
                 'preferredquality': '192',
             }]
         
-        # Explicit FFmpeg configuration to prevent corruption
+        # Explicit FFmpeg configuration
         ffmpeg_path = ffmpeg_bin('ffmpeg')
         ffprobe_path = ffmpeg_bin('ffprobe')
         
         if ffmpeg_path and ffprobe_path:
             ydl_opts['ffmpeg_location'] = os.path.dirname(ffmpeg_path)
-            # Ensure both ffmpeg and ffprobe are explicitly set
             if FFMPEG_DIR:
                 ydl_opts['ffmpeg_location'] = FFMPEG_DIR
             logger.info(f"Using FFmpeg from: {os.path.dirname(ffmpeg_path)}")
-            logger.info(f"FFmpeg binary: {ffmpeg_path}")
-            logger.info(f"FFprobe binary: {ffprobe_path}")
-        else:
-            logger.warning("FFmpeg or FFprobe not found - video processing may fail")
         
-        # Handle playlist selection - FIXED LOGIC
+        # Handle playlist selection
         if selection_ids:
             try:
-                # Convert to proper playlist indices (1-based)
                 indices = [int(x) for x in selection_ids]
-                # yt-dlp uses 1-based indexing for playlist_items
                 ydl_opts['playlist_items'] = ','.join(str(i) for i in indices)
                 logger.info(f"Playlist items selected: {ydl_opts['playlist_items']}")
             except Exception as e:
                 logger.error(f"Invalid selection IDs: {e}")
-                # If invalid, download all
                 pass
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -507,109 +454,87 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
                 jobs[job_id]['status'] = 'downloading'
             ydl.download([url])
         
-        # After download, collect produced files inside job_dir
+        # After download, collect produced files
         files = sorted(glob(os.path.join(job_dir, "**"), recursive=True))
         
-        # Enhanced file filtering
         def is_final_file(path: str) -> bool:
             name = os.path.basename(path).lower()
             if not os.path.isfile(path) or os.path.getsize(path) == 0:
                 return False
-            # Exclude temporary/intermediate files
             if name.endswith(('.part', '.ytdl', '.tmp', '.temp', '.f4v', '.f4a')):
                 return False
             if '.part.' in name or '.ytdl.' in name or '.tmp.' in name or '.temp.' in name:
                 return False
             if name.endswith(('.jpg', '.jpeg', '.png', '.webp', '.json', '.vtt', '.srt', '.txt', '.info')):
                 return False
-            # Include video and audio formats
             return name.endswith((".mp4", ".mp3", ".m4a", ".webm", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".3gp"))
         
         downloaded_files = [p for p in files if is_final_file(p)]
         
-        # Enhanced video stream validation
         def has_proper_video_stream(path: str) -> bool:
             """Check if file contains proper video stream"""
             try:
                 ffprobe = ffmpeg_bin('ffprobe')
                 if not ffprobe:
-                    return True  # Assume it's good if we can't check
+                    return True
                 
                 cmd = [ffprobe, '-v', 'quiet', '-print_format', 'json', '-show_streams', path]
                 proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15, encoding='utf-8', errors='ignore')
                 
                 if proc.returncode != 0:
-                    return True  # Assume it's good if probe fails
+                    return True
                 
                 import json
                 try:
                     data = json.loads(proc.stdout)
                     streams = data.get('streams', [])
-                    
-                    # Check for video stream
                     video_streams = [s for s in streams if s.get('codec_type') == 'video']
                     if not video_streams:
                         return False
-                    
-                    # Check if video stream has reasonable properties
                     video_stream = video_streams[0]
                     width = video_stream.get('width', 0)
                     height = video_stream.get('height', 0)
-                    
-                    # Must have reasonable dimensions
                     return width > 0 and height > 0
-                    
                 except json.JSONDecodeError:
-                    return True  # Assume it's good if we can't parse
-                    
+                    return True
             except Exception as e:
                 logger.warning(f"Error checking video stream in {path}: {e}")
-                return True  # Assume it's good if we can't check
+                return True
         
-        # Enhanced validation for all downloads to prevent corruption
         def validate_file_integrity(path: str) -> bool:
             """Validate file integrity using ffprobe"""
             try:
                 if not os.path.isfile(path) or os.path.getsize(path) == 0:
                     return False
-                    
                 ffprobe = ffmpeg_bin('ffprobe')
                 if not ffprobe:
-                    return True  # Can't validate without ffprobe, assume good
-                
-                # Quick validation - check if file can be read by ffprobe
+                    return True
                 cmd = [ffprobe, '-v', 'quiet', '-print_format', 'json', '-show_format', path]
                 proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10, encoding='utf-8', errors='ignore')
-                
-                if proc.returncode != 0:
-                    logger.warning(f"File validation failed for {path}: {proc.stderr}")
-                    return False
-                    
-                return True
+                return proc.returncode == 0
             except Exception as e:
                 logger.warning(f"Error validating file {path}: {e}")
-                return True  # Assume good if we can't validate
+                return True
         
-        # For video downloads, validate streams and integrity
+        # Validate files
         if kind == 'mp4':
             valid_files = []
             for p in downloaded_files:
                 if has_proper_video_stream(p) and validate_file_integrity(p):
                     valid_files.append(p)
                 else:
-                    logger.warning(f"File {p} failed validation (corrupt or invalid streams)")
+                    logger.warning(f"File {p} failed validation")
             downloaded_files = valid_files
         elif kind == 'mp3':
-            # Validate audio files
             valid_files = []
             for p in downloaded_files:
                 if validate_file_integrity(p):
                     valid_files.append(p)
                 else:
-                    logger.warning(f"Audio file {p} failed validation (corrupt)")
+                    logger.warning(f"Audio file {p} failed validation")
             downloaded_files = valid_files
         
-        # Determine if this is a playlist based on actual downloaded files
+        # Determine if this is a playlist
         with jobs_lock:
             detected_indices = list((jobs[job_id].get('items') or {}).keys())
             is_playlist = len(detected_indices) > 1 or len(downloaded_files) > 1
@@ -617,15 +542,15 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
         
         if not downloaded_files:
             logger.error(f"No suitable final files for job {job_id}")
-            raise Exception("No video files were downloaded successfully. This might be due to video unavailability, region restrictions, or format compatibility issues. Please try a different video or check the URL.")
+            raise Exception("No video files were downloaded successfully.")
         
-        # Resolve base URL in the worker thread
+        # Resolve base URL
         base_url = resolve_base_url()
         with jobs_lock:
             jobs[job_id]['completed_at'] = datetime.now().isoformat()
         
         if is_playlist and len(downloaded_files) > 1:
-            # ZIP for playlist (multiple files)
+            # ZIP for playlist
             zip_name = f"{job_id}.zip"
             zip_path = os.path.join(job_dir, zip_name)
             with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
@@ -650,29 +575,25 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
             output_file = best_file
             
             # Ensure MP4 output for video downloads
-            if kind == 'mp4':
-                # Check if we need to transcode to MP4
-                if not best_file.lower().endswith('.mp4'):
-                    # Create a sanitized filename for the output
-                    base_name = os.path.splitext(os.path.basename(best_file))[0]
-                    sanitized_name = sanitize_filename(base_name) + '.mp4'
-                    mp4_out = os.path.join(job_dir, sanitized_name)
-                    
-                    logger.info(f"Transcoding {best_file} to MP4 format")
-                    try:
-                        ok = transcode_to_mp4(best_file, mp4_out)
-                        if ok and os.path.isfile(mp4_out) and os.path.getsize(mp4_out) > 0:
-                            output_file = mp4_out
-                            # Remove original file to save space
-                            try:
-                                os.remove(best_file)
-                            except:
-                                pass
-                            logger.info(f"Successfully transcoded to: {sanitized_name}")
-                        else:
-                            logger.warning("Transcode failed, using original file")
-                    except Exception as e:
-                        logger.warning(f"Transcode failed with exception: {e}, using original file")
+            if kind == 'mp4' and not best_file.lower().endswith('.mp4'):
+                base_name = os.path.splitext(os.path.basename(best_file))[0]
+                sanitized_name = sanitize_filename(base_name) + '.mp4'
+                mp4_out = os.path.join(job_dir, sanitized_name)
+                
+                logger.info(f"Transcoding {best_file} to MP4 format")
+                try:
+                    ok = transcode_to_mp4(best_file, mp4_out)
+                    if ok and os.path.isfile(mp4_out) and os.path.getsize(mp4_out) > 0:
+                        output_file = mp4_out
+                        try:
+                            os.remove(best_file)
+                        except:
+                            pass
+                        logger.info(f"Successfully transcoded to: {sanitized_name}")
+                    else:
+                        logger.warning("Transcode failed, using original file")
+                except Exception as e:
+                    logger.warning(f"Transcode failed with exception: {e}, using original file")
             
             filename = os.path.basename(output_file)
             download_url = f"{base_url}download/{job_id}/{urllib.parse.quote(filename)}"
@@ -699,20 +620,80 @@ def download_worker(job_id, url, kind, resolution, selection_ids):
                     'progress': 0,
                 })
 
+# ----------------------------
+# Enhanced Metadata Extraction with Cookies
+# ----------------------------
+
+def extract_metadata_with_cookies(url: str) -> Optional[Dict[str, Any]]:
+    """Extract metadata using cookies with multiple fallback strategies"""
+    strategies = [
+        # Strategy 1: Simple extraction with cookies
+        {
+            'skip_download': True,
+            'ignoreerrors': True,
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,
+        },
+        # Strategy 2: Flat extraction for playlists
+        {
+            'skip_download': True,
+            'ignoreerrors': True,
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+        },
+        # Strategy 3: No format preferences
+        {
+            'skip_download': True,
+            'ignoreerrors': True,
+            'quiet': True,
+            'no_warnings': True,
+            'format': 'best',
+        },
+        # Strategy 4: Worst format (more likely available)
+        {
+            'skip_download': True,
+            'ignoreerrors': True,
+            'quiet': True,
+            'no_warnings': True,
+            'format': 'worst',
+        },
+    ]
+    
+    cookiefile = ensure_cookiefile()
+    
+    for i, strategy in enumerate(strategies):
+        try:
+            strategy_copy = strategy.copy()
+            if cookiefile:
+                strategy_copy['cookiefile'] = cookiefile
+                logger.info(f"Trying metadata extraction strategy {i+1} with cookies")
+            else:
+                logger.info(f"Trying metadata extraction strategy {i+1} without cookies")
+            
+            with yt_dlp.YoutubeDL(strategy_copy) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if info:
+                    logger.info(f"✓ Metadata extraction succeeded with strategy {i+1}")
+                    return info
+        except Exception as e:
+            logger.warning(f"✗ Metadata extraction strategy {i+1} failed: {e}")
+            continue
+    
+    return None
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-
 @app.route('/about')
 def about():
     return render_template('about.html')
 
-
 @app.route('/api/metadata', methods=['POST'])
 def get_metadata():
-    """Get video/playlist metadata"""
+    """Get video/playlist metadata with enhanced cookie support"""
     try:
         data = request.get_json()
         url = data.get('url', '').strip()
@@ -720,92 +701,99 @@ def get_metadata():
         if not url:
             return jsonify({'error': 'URL is required'}), 400
         
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': True,
-            'skip_download': True,
-        }
-
-        # Attach cookie file to metadata extraction as well
+        # Validate YouTube URL
+        if 'youtube.com' not in url and 'youtu.be' not in url:
+            return jsonify({'error': 'Please enter a valid YouTube URL'}), 400
+        
+        # Check cookies status
         cookiefile = ensure_cookiefile()
         if cookiefile:
-            ydl_opts['cookiefile'] = cookiefile
-            logger.info(f"Using cookie file for metadata extraction: {cookiefile}")
+            logger.info(f"Using cookies for metadata extraction: {cookiefile}")
+        else:
+            logger.warning("No cookies available for metadata extraction")
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            
-            if info.get('_type') == 'playlist':
-                # Playlist metadata
-                entries = []
-                for i, entry in enumerate(info.get('entries', [])):
-                    if entry:
-                        # Get more detailed info for each entry
-                        try:
-                            detailed_ydl_opts = {
-                                'quiet': True,
-                                'no_warnings': True,
-                                'skip_download': True,
-                            }
-                            # attach cookiefile to detailed extraction too
-                            if cookiefile:
-                                detailed_ydl_opts['cookiefile'] = cookiefile
-                            with yt_dlp.YoutubeDL(detailed_ydl_opts) as detail_ydl:
-                                detailed_info = detail_ydl.extract_info(entry.get('url', ''), download=False)
-                                
-                                # Extract available resolutions
-                                resolutions = set()
-                                formats = detailed_info.get('formats', [])
-                                for fmt in formats:
-                                    height = fmt.get('height')
-                                    if height:
-                                        resolutions.add(f"{height}p")
-                                
-                                entries.append({
-                                    'title': detailed_info.get('title', entry.get('title', 'Unknown')),
-                                    'thumbnail': detailed_info.get('thumbnail', entry.get('thumbnail')),
-                                    'duration': detailed_info.get('duration', entry.get('duration')),
-                                    'resolutions': sorted(list(resolutions), key=lambda x: int(x.replace('p', '')), reverse=True) or ['720p', '480p', '360p']
-                                })
-                        except Exception as e:
-                            logger.warning(f"Failed to get detailed info for playlist entry {i}: {e}")
-                            entries.append({
-                                'title': entry.get('title', 'Unknown'),
-                                'thumbnail': entry.get('thumbnail'),
-                                'duration': entry.get('duration'),
-                                'resolutions': ['720p', '480p', '360p']
-                            })
-                
-                return jsonify({
-                    'type': 'playlist',
-                    'title': info.get('title', 'Playlist'),
-                    'entries': entries
-                })
+        # Extract metadata
+        info = extract_metadata_with_cookies(url)
+        
+        if not info:
+            error_msg = "Unable to access this video."
+            if cookiefile:
+                error_msg += " The video might be unavailable or require different authentication."
             else:
-                # Single video metadata
+                error_msg += " This video might be age-restricted or private. Cookies are required for access."
+            
+            return jsonify({'error': error_msg}), 500
+        
+        # Process playlist or single video
+        if info.get('_type') == 'playlist':
+            entries = []
+            for i, entry in enumerate(info.get('entries', [])):
+                if entry:
+                    entries.append({
+                        'title': entry.get('title', f'Video {i+1}'),
+                        'thumbnail': entry.get('thumbnail'),
+                        'duration': entry.get('duration'),
+                        'resolutions': ['1080p', '720p', '480p', '360p']
+                    })
+            
+            return jsonify({
+                'type': 'playlist',
+                'title': info.get('title', 'Playlist'),
+                'entries': entries
+            })
+        else:
+            # Single video
+            title = info.get('title', 'Unknown Video')
+            thumbnail = info.get('thumbnail')
+            duration = info.get('duration')
+            channel = info.get('uploader') or info.get('channel')
+            
+            # Extract available resolutions
+            resolutions = ['1080p', '720p', '480p', '360p']
+            try:
                 formats = info.get('formats', [])
-                resolutions = set()
+                available_res = set()
                 for fmt in formats:
                     height = fmt.get('height')
                     if height:
-                        resolutions.add(f"{height}p")
+                        available_res.add(f"{height}p")
                 
-                return jsonify({
-                    'type': 'video',
-                    'video': {
-                        'title': info.get('title', 'Unknown'),
-                        'thumbnail': info.get('thumbnail'),
-                        'duration': info.get('duration'),
-                        'channel': info.get('uploader', info.get('channel')),
-                        'resolutions': sorted(list(resolutions), key=lambda x: int(x.replace('p', '')), reverse=True) or ['720p', '480p', '360p']
-                    }
-                })
+                if available_res:
+                    resolutions = sorted(list(available_res), key=lambda x: int(x.replace('p', '')), reverse=True)
+            except:
+                pass
+            
+            return jsonify({
+                'type': 'video',
+                'video': {
+                    'title': title,
+                    'thumbnail': thumbnail,
+                    'duration': duration,
+                    'channel': channel,
+                    'resolutions': resolutions
+                }
+            })
                 
     except Exception as e:
         logger.exception(f"Metadata extraction failed: {e}")
-        return jsonify({'error': f'Failed to extract metadata: {str(e)}'}), 500
-
+        
+        error_msg = str(e).lower()
+        if 'private' in error_msg or 'sign in' in error_msg:
+            return jsonify({
+                'error': 'This video is private or requires login. Private videos require valid YouTube cookies.'
+            }), 500
+        elif 'unavailable' in error_msg or 'not available' in error_msg:
+            return jsonify({
+                'error': 'This video is not available in your region or has been removed.'
+            }), 500
+        elif 'age restricted' in error_msg:
+            return jsonify({
+                'error': 'This is an age-restricted video. Valid YouTube cookies are required for access.'
+            }), 500
+        else:
+            return jsonify({
+                'error': f'Failed to get video information: {str(e)}'
+            }), 500
 
 @app.route('/api/download', methods=['POST'])
 def start_download():
@@ -848,7 +836,6 @@ def start_download():
         logger.exception(f"Download start failed: {e}")
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/api/progress/<job_id>')
 def get_progress(job_id):
     """Get download progress"""
@@ -857,12 +844,10 @@ def get_progress(job_id):
         if not job:
             return jsonify({'error': 'Job not found'}), 404
         
-        # Convert items dict to list for frontend
         items_dict = job.get('items', {})
         items_list = []
         for idx, item_data in items_dict.items():
             items_list.append({
-
                 'index': idx,
                 'title': item_data.get('title', f'Item {idx}'),
                 'progress': item_data.get('progress', 0),
@@ -887,7 +872,6 @@ def get_progress(job_id):
         
         return jsonify(result)
 
-
 @app.route('/download/<job_id>/<filename>')
 def download_file(job_id, filename):
     """Download a file"""
@@ -904,20 +888,22 @@ def download_file(job_id, filename):
         logger.exception(f"Download file failed: {e}")
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/static/<path:filename>')
 def static_files(filename):
     """Serve static files"""
     return send_from_directory('static', filename)
 
-
 if __name__ == '__main__':
-    # Set Flask app configuration for local development
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
     
-    # Run the app
     print("Starting YouTube Downloader...")
     print("Access the app at: http://localhost:5000")
-    print("Make sure FFmpeg is installed or placed in resources/ffmpeg/bin/")
+    
+    # Check for cookies
+    cookiefile = ensure_cookiefile()
+    if cookiefile:
+        print(f"✓ YouTube cookies loaded from: {cookiefile}")
+    else:
+        print("⚠ No YouTube cookies found. Age-restricted videos will not be accessible.")
     
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
