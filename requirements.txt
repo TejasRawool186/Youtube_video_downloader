@@ -1,0 +1,5 @@
+flask
+pillow
+qrcode
+yt-dlp
+gunicorn

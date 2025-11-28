@@ -1,0 +1,27 @@
+# Render configuration for resource-intensive Flask app
+services:
+  - type: web
+    name: ytstreamline-app
+    env: python
+    plan: starter # Free tier: 1GB RAM, 0.5 CPU
+    buildCommand: apt update && apt install -y ffmpeg && pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    autoDeploy: true
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: YT_DOWNLOAD_ROOT
+        value: /data/yt_web
+      - key: SECRET_KEY
+        value: cd445980e5d923c7619b0bac27eaf0e0
+      - key: FFMPEG_PATH
+        value: /usr/bin/ffmpeg
+      - key: YTDLP_PATH
+        value: yt-dlp
+      # 🔑 Add cookies as environment variable instead of secretFiles
+      - key: YOUTUBE_COOKIES
+        sync: false  # Set in dashboard, not stored in git
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 2

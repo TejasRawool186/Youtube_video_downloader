@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Glare Hover Effect Demo</title>
+    <style>
+        body {
+            background: #0a0520;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            padding: 40px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 40px;
+            background: linear-gradient(90deg, #9c6fff, #4b8fff, #ff6fe9);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        .demo-card {
+            background: rgba(16, 9, 40, 0.8);
+            border: 1px solid rgba(111, 76, 255, 0.3);
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+
+        .demo-card:hover {
+            border-color: rgba(111, 76, 255, 0.5);
+            box-shadow: 0 8px 20px rgba(111, 76, 255, 0.3);
+        }
+
+        .demo-card h3 {
+            margin-bottom: 15px;
+            color: #9c6fff;
+        }
+
+        .demo-card p {
+            color: #b7a9ff;
+            line-height: 1.6;
+        }
+
+        .icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        /* Glare Hover Effect */
+        .glare-hover {
+            overflow: hidden;
+            position: relative;
+        }
+
+        .glare-hover::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(
+                110deg,
+                transparent 0%,
+                transparent 40%,
+                rgba(255, 255, 255, 0) 45%,
+                rgba(255, 255, 255, 0.9) 50%,
+                rgba(255, 255, 255, 0) 55%,
+                transparent 60%,
+                transparent 100%
+            );
+            background-size: 200% 200%;
+            background-position: -100% 0;
+            background-repeat: no-repeat;
+            transition: background-position 800ms ease;
+            pointer-events: none;
+            z-index: 2;
+            opacity: 0;
+            mix-blend-mode: overlay;
+        }
+
+        .glare-hover:hover::before {
+            background-position: 200% 0;
+            opacity: 1;
+        }
+
+        .glare-hover-purple::before,
+        .glare-hover-blue::before,
+        .glare-hover-pink::before {
+            background: linear-gradient(
+                110deg,
+                transparent 0%,
+                transparent 40%,
+                rgba(255, 255, 255, 0) 45%,
+                rgba(255, 255, 255, 0.9) 50%,
+                rgba(255, 255, 255, 0) 55%,
+                transparent 60%,
+                transparent 100%
+            );
+            background-size: 200% 200%;
+        }
+
+        .glare-hover > * {
+            position: relative;
+            z-index: 3;
+        }
+
+        .info {
+            text-align: center;
+            margin-top: 40px;
+            padding: 20px;
+            background: rgba(16, 9, 40, 0.6);
+            border-radius: 12px;
+            border: 1px solid rgba(111, 76, 255, 0.2);
+        }
+
+        .info code {
+            background: rgba(156, 111, 255, 0.2);
+            padding: 2px 8px;
+            border-radius: 4px;
+            color: #9c6fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>✨ Glare Hover Effect Demo</h1>
+
+        <div class="grid">
+            <div class="demo-card glare-hover glare-hover-purple">
+                <div class="icon">🎬</div>
+                <h3>Video Downloads</h3>
+                <p>Download YouTube videos in 360p quality with reliable performance and fast speeds.</p>
+            </div>
+
+            <div class="demo-card glare-hover glare-hover-blue">
+                <div class="icon">🎵</div>
+                <h3>Audio Extraction</h3>
+                <p>Extract audio from videos and save as high-quality MP3 files for your music collection.</p>
+            </div>
+
+            <div class="demo-card glare-hover glare-hover-pink">
+                <div class="icon">📋</div>
+                <h3>Playlist Support</h3>
+                <p>Download entire playlists at once and get them packaged in a convenient ZIP file.</p>
+            </div>
+
+            <div class="demo-card glare-hover glare-hover-purple">
+                <div class="icon">📱</div>
+                <h3>QR Codes</h3>
+                <p>Generate QR codes for easy sharing and downloading on mobile devices.</p>
+            </div>
+
+            <div class="demo-card glare-hover glare-hover-blue">
+                <div class="icon">⚡</div>
+                <h3>Fast Processing</h3>
+                <p>Optimized download engine ensures quick processing and minimal wait times.</p>
+            </div>
+
+            <div class="demo-card glare-hover glare-hover-pink">
+                <div class="icon">🎨</div>
+                <h3>Beautiful UI</h3>
+                <p>Modern, responsive design with smooth animations and particle effects.</p>
+            </div>
+        </div>
+
+        <div class="info">
+            <h3>How It Works</h3>
+            <p>
+                The glare effect is applied automatically to all cards using the <code>glare-hover</code> class.
+                <br>
+                Three color variants are available: <code>glare-hover-purple</code>, <code>glare-hover-blue</code>, and <code>glare-hover-pink</code>.
+                <br><br>
+                <strong>Hover over any card to see the effect!</strong>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
