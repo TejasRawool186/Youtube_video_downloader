@@ -1,502 +1,527 @@
-"""
-Simple YouTube downloader Flask app - 360p quality
-"""
-
 import os
-import io
-import uuid
-import base64
-import socket
-import shutil
+import re
 import threading
-import urllib.parse
-from typing import Any, Dict, Optional
-from glob import glob
-from datetime import datetime
+import time
+import uuid
+from pathlib import Path
+from datetime import datetime, timedelta
 
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import (
+    Flask,
+    render_template,
+    request,
+    jsonify,
+    send_file,
+)
 import yt_dlp
-import qrcode
 import logging
-import zipfile
-import subprocess
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# ---------------------------------------------------------
+# BASIC SETUP
+# ---------------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parent
+DOWNLOAD_DIR = BASE_DIR / "downloads"
+DOWNLOAD_DIR.mkdir(exist_ok=True)
+
+COOKIES_PATH = BASE_DIR / "cookies.txt"
 
 app = Flask(__name__)
 
-# In-memory job store
-jobs: Dict[str, Dict[str, Any]] = {}
-jobs_lock = threading.Lock()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("ytdownloadx")
 
-# Download directory
-DOWNLOAD_ROOT = os.path.join(os.path.abspath(os.path.expanduser(os.getenv("YT_DOWNLOAD_ROOT", "/tmp/yt_web"))))
-os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
+# global flag to fall back to simple options if something misbehaves
+USE_SIMPLE_VERSION = False
 
-# Detect ffmpeg
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-RES_FFMPEG_BIN = os.path.join(PROJECT_ROOT, "resources", "ffmpeg", "bin")
-FFMPEG_DIR = RES_FFMPEG_BIN if os.path.isdir(RES_FFMPEG_BIN) else None
-if not FFMPEG_DIR:
-    FFMPEG_PATH = shutil.which("ffmpeg")
-    FFMPEG_DIR = os.path.dirname(FFMPEG_PATH) if FFMPEG_PATH else None
+# Files older than this (seconds) will be deleted by the cleanup thread
+DOWNLOAD_TTL_SECONDS = 60 * 30  # 30 minutes
 
-# ----------------------------
-# Helper functions
-# ----------------------------
+# ---------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------
 
-def generate_qr_code(url):
-    """Generate QR code as base64 data URL"""
-    try:
-        qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
-        qr.add_data(url)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        buffer = io.BytesIO()
-        img.save(buffer, format='PNG')
-        buffer.seek(0)
-        img_str = base64.b64encode(buffer.getvalue()).decode()
-        return f"data:image/png;base64,{img_str}"
-    except Exception as e:
-        logger.error(f"Failed to generate QR code: {e}")
-        return None
 
-def resolve_base_url() -> str:
-    """Get the base URL for downloads"""
-    from flask import has_request_context
-    try:
-        if has_request_context():
-            host = request.host.split(":")[0]
-            port = request.host.split(":")[1] if ":" in request.host else "5000"
-            scheme = "https" if request.is_secure else "http"
-            if host in ("127.0.0.1", "localhost"):
+def safe_download_name(title: str, ext: str) -> str:
+    """
+    Build a *HTTP-header-safe* download filename.
+
+    - Removes weird characters (/, ?, :, etc.)
+    - Keeps only letters, numbers, spaces, dash, underscore and dot
+    - Ensures we always return something ASCII-ish
+    """
+    if not title:
+        base = "video"
+    else:
+        # Replace disallowed chars with underscore
+        base = "".join(
+            c if c.isalnum() or c in " .-_"
+            else "_"
+            for c in title
+        )
+        # Collapse multiple underscores/spaces
+        base = re.sub(r"[_\s]+", " ", base).strip(" .-_")
+        if not base:
+            base = "video"
+
+    if not ext:
+        ext = "mp4"
+
+    return f"{base}.{ext}"
+
+
+def base_ydl_opts() -> dict:
+    """Common yt-dlp options used for both metadata and download."""
+    opts: dict = {
+        "verbose": True,
+        "ignoreerrors": True,
+        "retries": 5,
+        "fragment_retries": 5,
+        "skip_unavailable_fragments": True,
+        "source_address": "0.0.0.0",
+        "geo_bypass": True,
+        "geo_bypass_country": "US",
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/139.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-us,en;q=0.5",
+            "Sec-Fetch-Mode": "navigate",
+        },
+        "noplaylist": False,  # we want playlist metadata
+    }
+
+    if COOKIES_PATH.exists():
+        opts["cookiefile"] = str(COOKIES_PATH)
+
+    return opts
+
+
+def get_ydl_opts_enhanced(
+    download: bool = False, format_id: str | None = None, is_audio: bool = False
+) -> tuple[dict, str | None]:
+    """
+    Enhanced yt-dlp configuration.
+
+    Returns (opts, download_id). For metadata, download_id is None.
+    """
+    global USE_SIMPLE_VERSION
+    opts = base_ydl_opts()
+
+    if not download:
+        # metadata only
+        opts.update(
+            {
+                "skip_download": True,
+                "simulate": True,
+                "forcejson": True,
+                "extract_flat": False,
+                "quiet": False,
+                "no_warnings": False,
+                "listformats": True,
+                "outtmpl": str(DOWNLOAD_DIR / "%(id)s.%(ext)s"),
+            }
+        )
+        return opts, None
+
+    # actual download
+    download_id = uuid.uuid4().hex
+    outtmpl = str(DOWNLOAD_DIR / f"{download_id}_%(title).100s.%(ext)s")
+    opts["outtmpl"] = outtmpl
+
+    # Choose format
+    if is_audio:
+        # best audio; convert to mp3
+        opts["format"] = "bestaudio/best"
+        opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ]
+    else:
+        if format_id and format_id != "best":
+            # specific video format selected by frontend
+            opts["format"] = f"{format_id}+bestaudio/best"
+        else:
+            # best 1080p or lower
+            opts["format"] = "bestvideo*+bestaudio/best"
+
+        opts["postprocessors"] = [
+            {
+                "key": "FFmpegVideoConvertor",
+                "preferedformat": "mp4",
+            }
+        ]
+
+    logger.info("Using ENHANCED yt-dlp options")
+    return opts, download_id
+
+
+def get_ydl_opts_simple(
+    download: bool = False, format_id: str | None = None, is_audio: bool = False
+) -> tuple[dict, str | None]:
+    """
+    Very simple fallback options if enhanced mode fails for some user.
+    """
+    opts = base_ydl_opts()
+    opts["http_headers"]["User-Agent"] = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0 Safari/537.36"
+    )
+
+    if not download:
+        opts.update(
+            {
+                "skip_download": True,
+                "simulate": True,
+                "forcejson": True,
+                "extract_flat": False,
+                "quiet": False,
+                "no_warnings": False,
+                "listformats": True,
+                "outtmpl": str(DOWNLOAD_DIR / "%(id)s.%(ext)s"),
+            }
+        )
+        return opts, None
+
+    download_id = uuid.uuid4().hex
+    outtmpl = str(DOWNLOAD_DIR / f"{download_id}_%(title).100s.%(ext)s")
+    opts["outtmpl"] = outtmpl
+
+    if is_audio:
+        opts["format"] = "bestaudio/best"
+        opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ]
+    else:
+        if format_id and format_id != "best":
+            opts["format"] = format_id
+        else:
+            opts["format"] = "best[height<=1080]/best"
+
+        opts["postprocessors"] = [
+            {
+                "key": "FFmpegVideoConvertor",
+                "preferedformat": "mp4",
+            }
+        ]
+
+    logger.info("Using SIMPLE yt-dlp options")
+    return opts, download_id
+
+
+def final_opts(
+    download: bool = False, format_id: str | None = None, is_audio: bool = False
+) -> tuple[dict, str | None]:
+    """
+    Decide which options to use (enhanced or simple) depending on global flag.
+    """
+    global USE_SIMPLE_VERSION
+    if USE_SIMPLE_VERSION:
+        return get_ydl_opts_simple(download=download, format_id=format_id, is_audio=is_audio)
+    return get_ydl_opts_enhanced(download=download, format_id=format_id, is_audio=is_audio)
+
+
+def extract_formats_for_frontend(formats: list[dict]) -> list[dict]:
+    """
+    Convert yt-dlp 'formats' list to a trimmed version for the resolution dropdown.
+    """
+    cleaned: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for f in formats or []:
+        fmt_id = str(f.get("format_id") or f.get("id") or "")
+        if not fmt_id or fmt_id in seen_ids:
+            continue
+
+        # skip weird text formats like "mhtml"
+        if f.get("ext") == "mhtml":
+            continue
+
+        item = {
+            "format_id": fmt_id,
+            "ext": f.get("ext"),
+            "height": f.get("height"),
+            "width": f.get("width"),
+            "fps": f.get("fps"),
+            "tbr": f.get("tbr"),
+            "vcodec": f.get("vcodec"),
+            "acodec": f.get("acodec"),
+            "resolution": f.get("resolution"),
+            "quality": f.get("quality"),
+        }
+        cleaned.append(item)
+        seen_ids.add(fmt_id)
+
+    return cleaned
+
+
+# ---------------------------------------------------------
+# CLEANUP THREAD
+# ---------------------------------------------------------
+
+
+def cleanup_downloads_worker():
+    while True:
+        try:
+            now = time.time()
+            for path in DOWNLOAD_DIR.iterdir():
                 try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    s.connect(("8.8.8.8", 80))
-                    ip = s.getsockname()[0]
-                    s.close()
-                    return f"{scheme}://{ip}:{port}/"
-                except Exception:
-                    pass
-            return request.host_url
-        else:
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                ip = s.getsockname()[0]
-                s.close()
-                return f"http://{ip}:5000/"
-            except Exception:
-                return "http://localhost:5000/"
-    except Exception:
-        return "http://localhost:5000/"
+                    if not path.is_file():
+                        continue
+                    age = now - path.stat().st_mtime
+                    if age > DOWNLOAD_TTL_SECONDS:
+                        logger.info("Cleaning up old file: %s", path)
+                        path.unlink(missing_ok=True)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Error cleaning file %s: %s", path, e)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Cleanup worker error: %s", e)
 
-def get_format_selector(kind: str) -> str:
-    """Get yt-dlp format selector - 360p for video, best audio for mp3"""
-    if kind == "mp3":
-        return "bestaudio[ext=m4a]/bestaudio/best"
-    # 360p video
-    return "best[height<=360][ext=mp4]/best[height<=360]/best[ext=mp4]/best"
+        time.sleep(600)  # every 10 minutes
 
-def progress_hook(d, job_id):
-    """Progress hook for yt-dlp downloads"""
-    with jobs_lock:
-        if job_id not in jobs:
-            return
-        job = jobs[job_id]
-        status = d.get('status')
-        info = d.get('info_dict') or {}
-        pl_index = info.get('playlist_index')
-        title = info.get('title')
-        filename = d.get('filename')
-        
-        if 'items' not in job:
-            job['items'] = {}
-        if pl_index is not None:
-            item = job['items'].setdefault(int(pl_index), {'title': title, 'progress': 0, 'status': 'queued', 'filename': None})
-            if title and not item.get('title'):
-                item['title'] = title
-            if filename:
-                item['filename'] = os.path.basename(filename)
-        
-        if status == 'downloading':
-            downloaded = d.get('downloaded_bytes', 0)
-            total = d.get('total_bytes') or d.get('total_bytes_estimate')
-            if total and total > 0:
-                percentage = (downloaded / total)
-                job['progress'] = round(percentage * 100, 2)
-            else:
-                job['progress'] = None
-            job['status'] = 'downloading'
-            job['eta'] = d.get('eta')
-            job['speed'] = d.get('speed')
-            if filename:
-                job['filename'] = os.path.basename(filename)
-            if pl_index is not None:
-                job['items'][int(pl_index)]['progress'] = round((d.get('downloaded_bytes', 0) / (total or 1)) * 100, 1) if total else None
-                job['items'][int(pl_index)]['status'] = 'downloading'
-        elif status == 'finished':
-            job['progress'] = 100
-            job['status'] = 'processing'
-            if filename:
-                job['produced_file'] = filename
-            if pl_index is not None:
-                job['items'][int(pl_index)]['progress'] = 100
-                job['items'][int(pl_index)]['status'] = 'processing'
 
-def ffmpeg_bin(name: str) -> Optional[str]:
-    """Resolve ffmpeg/ffprobe binaries"""
-    if FFMPEG_DIR:
-        candidate = os.path.join(FFMPEG_DIR, f"{name}.exe") if os.name == 'nt' else os.path.join(FFMPEG_DIR, name)
-        if os.path.isfile(candidate):
-            return candidate
-    return shutil.which(name)
+threading.Thread(target=cleanup_downloads_worker, daemon=True).start()
 
-def sanitize_filename(filename):
-    """Remove problematic characters from filenames"""
-    import re
-    invalid_chars = '<>:"/\\|?*#!'
-    for char in invalid_chars:
-        filename = filename.replace(char, '_')
-    filename = re.sub(r'[^\w\s\-_\.\(\)\[\]]', '_', filename)
-    filename = re.sub(r'_+', '_', filename)
-    filename = filename.strip('_.')
-    if not filename:
-        filename = 'video'
-    if len(filename) > 200:
-        filename = filename[:200]
-    return filename
+# ---------------------------------------------------------
+# ROUTES
+# ---------------------------------------------------------
 
-def download_worker(job_id, url, kind, selection_ids):
-    """Worker function for downloading videos"""
-    try:
-        with jobs_lock:
-            if job_id not in jobs:
-                return
-            jobs[job_id]['status'] = 'starting'
-            jobs[job_id]['current_video'] = 1
-            jobs[job_id]['total_videos'] = len(selection_ids) if selection_ids else 1
-            jobs[job_id]['items'] = {}
-            jobs[job_id]['is_playlist'] = True if selection_ids else False
-        
-        # Create job directory
-        job_dir = os.path.join(DOWNLOAD_ROOT, job_id)
-        os.makedirs(job_dir, exist_ok=True)
-        
-        # Configure yt-dlp options
-        format_selector = get_format_selector(kind)
-        logger.info(f"Job {job_id}: kind={kind}, format={format_selector}")
-        
-        ydl_opts = {
-            'format': format_selector,
-            'outtmpl': os.path.join(job_dir, '%(title)s.%(ext)s'),
-            'progress_hooks': [lambda d: progress_hook(d, job_id)],
-            'ignoreerrors': True,
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': False,
-            'noplaylist': False,
-        }
 
-        # For video downloads, ensure MP4 output
-        if kind == "mp4" and FFMPEG_DIR:
-            ydl_opts['merge_output_format'] = 'mp4'
-            ydl_opts['postprocessors'] = [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4'
-            }]
-        
-        if kind == "mp3":
-            ydl_opts['postprocessors'] = [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }]
-        
-        # FFmpeg configuration
-        ffmpeg_path = ffmpeg_bin('ffmpeg')
-        if ffmpeg_path:
-            ydl_opts['ffmpeg_location'] = os.path.dirname(ffmpeg_path)
-        
-        # Handle playlist selection
-        if selection_ids:
-            try:
-                indices = [int(x) for x in selection_ids]
-                ydl_opts['playlist_items'] = ','.join(str(i) for i in indices)
-            except Exception as e:
-                logger.error(f"Invalid selection IDs: {e}")
-        
-        # Download
-        with jobs_lock:
-            jobs[job_id]['status'] = 'downloading'
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        
-        # Collect downloaded files
-        files = sorted(glob(os.path.join(job_dir, "**"), recursive=True))
-        
-        def is_final_file(path: str) -> bool:
-            name = os.path.basename(path).lower()
-            if not os.path.isfile(path) or os.path.getsize(path) == 0:
-                return False
-            if name.endswith(('.part', '.ytdl', '.tmp', '.temp')):
-                return False
-            if name.endswith(('.jpg', '.jpeg', '.png', '.json', '.vtt', '.srt', '.txt')):
-                return False
-            return name.endswith((".mp4", ".mp3", ".m4a", ".webm", ".mkv"))
-        
-        downloaded_files = [p for p in files if is_final_file(p)]
-        
-        if not downloaded_files:
-            raise Exception("No video files were downloaded successfully.")
-        
-        # Resolve base URL
-        base_url = resolve_base_url()
-        with jobs_lock:
-            jobs[job_id]['completed_at'] = datetime.now().isoformat()
-        
-        # Determine if playlist
-        with jobs_lock:
-            detected_indices = list((jobs[job_id].get('items') or {}).keys())
-            is_playlist = len(detected_indices) > 1 or len(downloaded_files) > 1
-            jobs[job_id]['is_playlist'] = is_playlist
-        
-        if is_playlist and len(downloaded_files) > 1:
-            # ZIP for playlist
-            zip_name = f"{job_id}.zip"
-            zip_path = os.path.join(job_dir, zip_name)
-            with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
-                for f in downloaded_files:
-                    zf.write(f, arcname=os.path.basename(f))
-            zip_url = f"{base_url}download/{job_id}/{zip_name}"
-            qr_code = generate_qr_code(zip_url)
-            with jobs_lock:
-                if job_id in jobs:
-                    jobs[job_id]['files'] = [os.path.relpath(f, job_dir) for f in downloaded_files]
-                    jobs[job_id].update({
-                        'status': 'completed',
-                        'progress': 100,
-                        'filename': zip_name,
-                        'final_file': zip_name,
-                        'download_url': zip_url,
-                        'qr': qr_code,
-                    })
-        else:
-            # Single file
-            best_file = max(downloaded_files, key=lambda p: os.path.getsize(p))
-            filename = os.path.basename(best_file)
-            download_url = f"{base_url}download/{job_id}/{urllib.parse.quote(filename)}"
-            qr_code = generate_qr_code(download_url)
-            
-            with jobs_lock:
-                if job_id in jobs:
-                    jobs[job_id].update({
-                        'status': 'completed',
-                        'progress': 100,
-                        'filename': filename,
-                        'final_file': filename,
-                        'download_url': download_url,
-                        'qr': qr_code,
-                    })
-                    
-    except Exception as e:
-        logger.exception(f"Download worker error for job {job_id}: {e}")
-        with jobs_lock:
-            if job_id in jobs:
-                jobs[job_id].update({
-                    'status': 'error',
-                    'error': str(e),
-                    'progress': 0,
-                })
-
-# ----------------------------
-# Routes
-# ----------------------------
-
-@app.route('/')
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/about')
+
+@app.route("/about")
 def about():
-    return render_template('about.html')
+    return render_template("about.html") if (BASE_DIR / "templates" / "about.html").exists() else render_template(
+        "index.html"
+    )
 
-@app.route('/api/metadata', methods=['POST'])
-def get_metadata():
-    """Get video/playlist metadata"""
+
+@app.route("/api/health")
+def health():
     try:
-        data = request.get_json()
-        url = data.get('url', '').strip()
-        
-        if not url:
-            return jsonify({'error': 'URL is required'}), 400
-        
-        if 'youtube.com' not in url and 'youtu.be' not in url:
-            return jsonify({'error': 'Please enter a valid YouTube URL'}), 400
-        
-        # Extract metadata
-        ydl_opts = {
-            'skip_download': True,
-            'ignoreerrors': True,
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': False,
+        downloads_count = len([p for p in DOWNLOAD_DIR.iterdir() if p.is_file()])
+    except Exception:
+        downloads_count = 0
+    return jsonify(
+        {
+            "status": "ok",
+            "cookies_exists": COOKIES_PATH.exists(),
+            "downloads": downloads_count,
         }
-        
+    )
+
+
+@app.route("/api/metadata", methods=["POST"])
+def metadata():
+    """Return video or playlist metadata."""
+    global USE_SIMPLE_VERSION
+
+    try:
+        data = request.get_json(force=True) or {}
+        url = data.get("url", "").strip()
+        if not url:
+            return jsonify({"error": "URL_REQUIRED"}), 400
+
+        logger.info("Metadata request for URL: %s", url)
+
+        ydl_opts, _ = final_opts(download=False)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-        
-        if not info:
-            return jsonify({'error': 'Unable to access this video'}), 400
-        
-        # Check if playlist
-        is_playlist = 'entries' in info
-        
-        if is_playlist:
-            entries = info.get('entries', [])
+
+        # Playlist
+        if info.get("_type") in {"playlist", "multi_video"} or info.get("entries"):
+            entries = info.get("entries") or []
             videos = []
-            # Get common resolutions from all videos
-            all_resolutions = set()
-            for idx, entry in enumerate(entries, 1):
-                if entry:
-                    # Extract available formats
-                    formats = entry.get('formats', [])
-                    for fmt in formats:
-                        height = fmt.get('height')
-                        if height:
-                            all_resolutions.add(f"{height}p")
-                    
-                    videos.append({
-                        'index': idx,
-                        'title': entry.get('title', f'Video {idx}'),
-                        'duration': entry.get('duration'),
-                        'thumbnail': entry.get('thumbnail'),
-                        'id': entry.get('id'),
-                        'resolutions': sorted(list(all_resolutions), key=lambda x: int(x.replace('p', '')), reverse=True)
-                    })
-            
-            # Standard resolution options for UI
-            standard_resolutions = ['2160p', '1440p', '1080p', '720p', '480p', '360p', '240p', '144p']
-            
-            return jsonify({
-                'type': 'playlist',
-                'title': info.get('title', 'Playlist'),
-                'uploader': info.get('uploader'),
-                'video_count': len(videos),
-                'videos': videos,
-                'entries': videos  # For compatibility
-            })
-        else:
-            # Extract available formats for single video
-            formats = info.get('formats', [])
-            resolutions = set()
-            for fmt in formats:
-                height = fmt.get('height')
-                if height:
-                    resolutions.add(f"{height}p")
-            
-            # Standard resolution options for UI (even if not all available)
-            standard_resolutions = ['2160p', '1440p', '1080p', '720p', '480p', '360p', '240p', '144p']
-            
-            return jsonify({
-                'type': 'video',
-                'video': {
-                    'title': info.get('title'),
-                    'channel': info.get('uploader') or info.get('channel'),
-                    'duration': info.get('duration'),
-                    'thumbnail': info.get('thumbnail'),
-                    'description': info.get('description', '')[:200],
-                    'resolutions': standard_resolutions  # Show all options in UI
+            for idx, entry in enumerate(entries, start=1):
+                if not entry:
+                    continue
+                videos.append(
+                    {
+                        "id": entry.get("id"),
+                        "title": entry.get("title"),
+                        "duration": entry.get("duration"),
+                        "thumbnail": entry.get("thumbnail"),
+                        "uploader": entry.get("uploader") or entry.get("channel"),
+                        "index": entry.get("playlist_index") or idx,
+                        "url": entry.get("webpage_url")
+                        or f"https://www.youtube.com/watch?v={entry.get('id')}",
+                    }
+                )
+
+            # For playlist resolution dropdown, we use first non-empty entry with formats (if present)
+            playlist_formats = []
+            first_with_formats = next(
+                (e for e in entries if e and e.get("formats")), None
+            )
+            if first_with_formats:
+                playlist_formats = extract_formats_for_frontend(
+                    first_with_formats.get("formats")
+                )
+
+            return jsonify(
+                {
+                    "success": True,
+                    "kind": "playlist",
+                    "playlist": {
+                        "id": info.get("id"),
+                        "title": info.get("title") or "Playlist",
+                        "uploader": info.get("uploader") or info.get("channel"),
+                        "video_count": len(videos),
+                        "videos": videos,
+                    },
+                    "formats": playlist_formats,
                 }
-            })
-            
-    except Exception as e:
-        logger.exception(f"Metadata error: {e}")
-        return jsonify({'error': str(e)}), 500
+            )
 
-@app.route('/api/download', methods=['POST'])
-def start_download():
-    """Start download job - always downloads 360p regardless of user selection"""
+        # Single video
+        video_info = {
+            "id": info.get("id"),
+            "title": info.get("title"),
+            "duration": info.get("duration"),
+            "thumbnail": info.get("thumbnail"),
+            "uploader": info.get("uploader") or info.get("channel"),
+            "view_count": info.get("view_count"),
+            "like_count": info.get("like_count"),
+            "formats": extract_formats_for_frontend(info.get("formats")),
+        }
+
+        return jsonify({"success": True, "kind": "video", "video": video_info})
+
+    except Exception as e:  # noqa: BLE001
+        logger.exception("METADATA ERROR: %s", e)
+
+        # If enhanced mode failed once, flip the switch and try simple next time
+        if not USE_SIMPLE_VERSION:
+            USE_SIMPLE_VERSION = True
+            logger.warning("Switching to SIMPLE yt-dlp mode due to metadata error.")
+
+        return jsonify({"error": "METADATA_FAILED", "message": str(e)}), 500
+
+
+@app.route("/api/download", methods=["POST"])
+def download():
+    """
+    Download a single video (normal or audio-only).
+
+    The frontend calls this for:
+      - single URLs
+      - each selected video inside a playlist (one by one)
+    """
+    global USE_SIMPLE_VERSION
+
     try:
-        data = request.get_json()
-        url = data.get('url', '').strip()
-        kind = data.get('kind', 'mp4')
-        resolution = data.get('resolution', '360p')  # Accept but ignore - always use 360p
-        selection_ids = data.get('selection', [])
-        
+        data = request.get_json(force=True) or {}
+        url = data.get("url", "").strip()
+        format_id = data.get("format_id") or data.get("resolution") or "best"
+        kind = (data.get("kind") or "mp4").lower()
+        is_audio = kind == "mp3"
+
         if not url:
-            return jsonify({'error': 'URL is required'}), 400
-        
-        if kind not in ('mp4', 'mp3'):
-            return jsonify({'error': 'Invalid format'}), 400
-        
-        job_id = str(uuid.uuid4())
-        
-        with jobs_lock:
-            jobs[job_id] = {
-                'status': 'queued',
-                'progress': 0,
-                'url': url,
-                'kind': kind,
-                'requested_resolution': resolution,  # Store what user requested
-                'actual_resolution': '360p',  # But always download 360p
-                'created_at': datetime.now().isoformat()
-            }
-        
-        # Start download in background (always 360p)
-        thread = threading.Thread(target=download_worker, args=(job_id, url, kind, selection_ids))
-        thread.daemon = True
-        thread.start()
-        
-        return jsonify({'job_id': job_id})
-        
-    except Exception as e:
-        logger.exception(f"Download start error: {e}")
-        return jsonify({'error': str(e)}), 500
+            return jsonify({"error": "URL_REQUIRED"}), 400
 
-@app.route('/api/status/<job_id>', methods=['GET'])
-def get_status(job_id):
-    """Get job status"""
-    with jobs_lock:
-        job = jobs.get(job_id)
-        if not job:
-            return jsonify({'error': 'Job not found'}), 404
-        
-        # Convert items dict to array for frontend
-        job_copy = job.copy()
-        if 'items' in job_copy and isinstance(job_copy['items'], dict):
-            items_array = []
-            for idx, item in sorted(job_copy['items'].items()):
-                item_copy = item.copy()
-                item_copy['index'] = idx
-                items_array.append(item_copy)
-            job_copy['items'] = items_array
-        
-        return jsonify(job_copy)
+        logger.info("Download request: url=%s, kind=%s, format=%s", url, kind, format_id)
 
-@app.route('/api/progress/<job_id>', methods=['GET'])
-def get_progress(job_id):
-    """Get job progress (alias for status)"""
-    return get_status(job_id)
+        ydl_opts, download_id = final_opts(
+            download=True, format_id=format_id, is_audio=is_audio
+        )
 
-@app.route('/download/<job_id>/<path:filename>')
-def download_file(job_id, filename):
-    """Download file"""
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+
+        # Determine downloaded file path
+        file_path = info.get("_filename")
+        if file_path:
+            file_path = Path(file_path)
+        else:
+            # fallback: find by download_id
+            candidates = list(DOWNLOAD_DIR.glob(f"{download_id}_*"))
+            file_path = candidates[0] if candidates else None
+
+        if not file_path or not file_path.exists():
+            logger.error("Downloaded file not found for url=%s", url)
+            return jsonify({"error": "FILE_NOT_FOUND"}), 500
+
+        title = info.get("title") or "video"
+        ext = file_path.suffix.lstrip(".").lower() or ("mp3" if is_audio else "mp4")
+        download_name = safe_download_name(title, ext)
+
+        logger.info("Sending file %s as %s", file_path, download_name)
+
+        resp = send_file(
+            file_path,
+            as_attachment=True,
+            download_name=download_name,
+            mimetype="audio/mpeg" if ext == "mp3" else "video/mp4",
+            conditional=True,
+        )
+
+        # expose a short id so frontend can build /files/<id> QR link
+        if download_id:
+            resp.headers["X-Download-Id"] = download_id
+
+        return resp
+
+    except Exception as e:  # noqa: BLE001
+        logger.error("DOWNLOAD ERROR: %s", e)
+
+        # If enhanced mode failed once, flip to simple for next calls
+        if not USE_SIMPLE_VERSION:
+            USE_SIMPLE_VERSION = True
+            logger.warning("Switching to SIMPLE yt-dlp mode due to download error.")
+
+        return jsonify({"error": "DOWNLOAD_FAILED", "message": str(e)}), 502
+
+
+@app.route("/files/<download_id>")
+def serve_file_by_id(download_id: str):
+    """
+    Used for QR-code mobile download.
+
+    We DON'T expose the raw filename in the URL, only the random id prefix.
+    """
     try:
-        job_dir = os.path.join(DOWNLOAD_ROOT, job_id)
-        file_path = os.path.join(job_dir, filename)
-        
-        if not os.path.exists(file_path):
-            return jsonify({'error': 'File not found'}), 404
-        
-        return send_file(file_path, as_attachment=True, download_name=filename)
-        
-    except Exception as e:
-        logger.exception(f"Download file error: {e}")
-        return jsonify({'error': str(e)}), 500
+        candidates = sorted(DOWNLOAD_DIR.glob(f"{download_id}_*"))
+        if not candidates:
+            return "File expired or not found", 404
 
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+        file_path = candidates[0]
+        title_part = file_path.name.split("_", 1)[-1].rsplit(".", 1)[0]
+        ext = file_path.suffix.lstrip(".").lower() or "mp4"
+        download_name = safe_download_name(title_part, ext)
+
+        logger.info("QR /files request -> %s as %s", file_path, download_name)
+
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=download_name,
+            mimetype="audio/mpeg" if ext == "mp3" else "video/mp4",
+            conditional=True,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error("FILES ROUTE ERROR: %s", e)
+        return "Internal error", 500
+
+
+# ---------------------------------------------------------
+# MAIN (for local testing)
+# ---------------------------------------------------------
+if __name__ == "__main__":
+    # For local testing only; in production gunicorn runs this
+    app.run(host="0.0.0.0", port=5000, debug=True)

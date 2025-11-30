@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  ytdownloadx:
+    build: .
+    container_name: ytdownloadx
+    restart: unless-stopped
+    ports:
+      - "5005:5000"
+    volumes:
+      - ./downloads:/app/downloads
+      - ./cookies.txt:/app/cookies.txt
+      - ./temp:/app/temp
+    environment:
+      - PYTHONUNBUFFERED=1
+      - YTDLP_NO_WARNINGS=0
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

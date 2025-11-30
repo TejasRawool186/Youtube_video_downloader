@@ -5,10 +5,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>YTDownloadX - Free YouTube Video & Playlist Downloader</title>
-  <link rel="icon" href="{{ url_for('static', filename='image/YTDownloadX.png') }}?v=2" type="image/x-icon">
+  <link rel="icon" href="{{ url_for('static', filename='image/YTDownloadX.png') }}?v=3" type="image/x-icon">
 
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="/static/styles.css?v=4" rel="stylesheet">
+  <link href="{{ url_for('static', filename='styles.css') }}?v=5" rel="stylesheet">
 </head>
 
 <body class="bg-dark" data-bs-theme="dark">
@@ -53,7 +53,7 @@
           <h1 class="hero-title">
             <span class="hero-title-main">Download YouTube Videos</span>
             <br>
-            <span class="hero-title-gradient">Fast & High Quality</span>
+            <span class="hero-title-gradient">Fast &amp; High Quality</span>
           </h1>
 
           <p class="hero-description">
@@ -76,6 +76,7 @@
 
   <main class="container py-5" id="download">
 
+    <!-- URL + buttons -->
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <div class="row g-2 align-items-center">
@@ -99,14 +100,18 @@
       </div>
     </div>
 
+    <!-- Metadata section (video OR playlist) -->
     <div id="metaSection" class="d-none">
+      <!-- Single video -->
       <div id="videoMeta" class="row g-3 align-items-center mb-3 d-none">
         <div class="col-12 col-md-3 text-center">
           <img id="thumb" class="img-fluid rounded" alt="thumbnail">
         </div>
         <div class="col-12 col-md-9">
           <h5 id="title" class="mb-1"></h5>
-          <div class="text-secondary small mb-2"><span id="channel"></span> <span id="duration" class="ms-2"></span>
+          <div class="text-secondary small mb-2">
+            <span id="channel"></span>
+            <span id="duration" class="ms-2"></span>
           </div>
           <div class="row g-2">
             <div class="col-6 col-md-3">
@@ -127,10 +132,14 @@
         </div>
       </div>
 
+      <!-- Playlist -->
       <div id="playlistMeta" class="mb-3 d-none">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <h5 class="mb-0">Playlist Videos</h5>
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-2">
           <div>
+            <h5 class="mb-1" id="plTitle">Playlist Videos</h5>
+            <small class="text-secondary" id="plSub"></small>
+          </div>
+          <div class="mt-2 mt-md-0">
             <label class="me-2"><input id="selectAll" type="checkbox"> Select All</label>
             <select id="plFormat" class="form-select d-inline-block w-auto">
               <option value="mp4">MP4 (video)</option>
@@ -144,7 +153,8 @@
       </div>
     </div>
 
-    <div id="progressArea" class="d-none">
+    <!-- Progress area -->
+    <div id="progressArea" class="d-none mt-4">
       <div class="card shadow-sm">
         <div class="card-body">
           <div class="d-flex align-items-center justify-content-between mb-2">
@@ -152,19 +162,20 @@
             <div id="eta" class="text-secondary small"></div>
           </div>
           <div id="playlistProgress" class="mb-2 d-none">
-            <small class="text-secondary">Processing video <span id="currentVideo">1</span> of <span
-                id="totalVideos">1</span></small>
+            <small class="text-secondary">
+              Processing video <span id="currentVideo">1</span> of
+              <span id="totalVideos">1</span>
+            </small>
           </div>
-          <div id="itemsProgress" class="mb-3 d-none"></div>
-          <div class="progress" role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100">
+          <div class="progress" role="progressbar" aria-label="Download progress" aria-valuemin="0"
+            aria-valuemax="100">
             <div id="progressBar" class="progress-bar" style="width: 0%">0%</div>
           </div>
           <div id="doneArea" class="mt-3 d-none">
-            <a id="downloadLink" class="btn btn-primary" href="#" download>Download file</a>
-            <span id="doneHint" class="text-secondary small ms-2"></span>
+            <span id="doneHint" class="text-secondary small"></span>
           </div>
           <div id="qrWrap" class="text-center mt-3 d-none">
-            <p class="text-secondary small mb-1">Scan to open on mobile</p>
+            <p class="text-secondary small mb-1">Scan to open this file on your phone (valid ~30 minutes)</p>
             <img id="qr" class="border rounded p-1" alt="QR" />
           </div>
         </div>
@@ -185,12 +196,11 @@
           <div class="col-lg-4">
             <div class="feature-card">
               <div class="feature-icon">
-                <span class="star">⭐</span>
+                <span class="star">★</span>
               </div>
-              <h4 class="fw-bold mb-3">Playlist & Bulk Downloads</h4>
+              <h4 class="fw-bold mb-3">Playlist &amp; Bulk Downloads</h4>
               <p class="text-muted">
                 Download an entire playlist or multiple videos in one go — no need to copy each link separately.
-                This is a big time-saver and something most simple downloaders don't do well.
               </p>
             </div>
           </div>
@@ -198,12 +208,12 @@
           <div class="col-lg-4">
             <div class="feature-card">
               <div class="feature-icon">
-                <span class="star">⭐</span>
+                <span class="star">★</span>
               </div>
               <h4 class="fw-bold mb-3">QR Code Link Sharing</h4>
               <p class="text-muted">
-                Generate a QR code for any download link directly inside the app. Users can scan the code on their phone
-                and start the download instantly — super convenient for moving videos between devices.
+                Generate a QR code for any download link directly inside the app. Scan on your phone and start the
+                download instantly.
               </p>
             </div>
           </div>
@@ -211,12 +221,11 @@
           <div class="col-lg-4">
             <div class="feature-card">
               <div class="feature-icon">
-                <span class="star">⭐</span>
+                <span class="star">★</span>
               </div>
               <h4 class="fw-bold mb-3">Fast, High-Quality Downloads</h4>
               <p class="text-muted">
-                Your app automatically fetches video details (title, thumbnail, etc.) and lets users pick formats
-                (MP4, MP3, HD, etc.) for fast, high-quality downloads without ads or interruptions.
+                Choose between MP4 and MP3, pick your resolution, and download without ads or interruptions.
               </p>
             </div>
           </div>
@@ -250,89 +259,70 @@
   </footer>
 
   <!-- Particle Network Background -->
-  <script src="/static/particles.js?v=4"></script>
+  <script src="{{ url_for('static', filename='particles.js') }}?v=4"></script>
 
   <!-- Glare Hover Effect -->
-  <script src="/static/glare-hover.js?v=1"></script>
+  <script src="{{ url_for('static', filename='glare-hover.js') }}?v=1"></script>
 
   <script>
     const d = (sel) => document.querySelector(sel);
     const dd = (sel) => document.querySelectorAll(sel);
+
     const secondsToHms = s => {
       if (!s && s !== 0) return "";
       const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
       return [h ? `${h}h` : null, m ? `${m}m` : null, `${sec}s`].filter(Boolean).join(' ');
-    }
+    };
 
     document.getElementById('year').textContent = new Date().getFullYear();
 
     // ============================================
     // NOTIFICATION SYSTEM
     // ============================================
-
-    // Load notification preferences from localStorage
     const notifyPrefs = {
-      enabled: localStorage.getItem('notifyEnabled') !== 'false', // default true
-      sound: localStorage.getItem('notifySound') !== 'false' // default true
+      enabled: localStorage.getItem('notifyEnabled') !== 'false',
+      sound: localStorage.getItem('notifySound') !== 'false'
     };
 
-    // Request notification permission on page load
     if ('Notification' in window && notifyPrefs.enabled) {
       if (Notification.permission === 'default') {
         Notification.requestPermission();
       }
     }
 
-    // Sound alert (simple beep)
     const playNotificationSound = () => {
       if (!notifyPrefs.sound) return;
-
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-
-      oscillator.frequency.value = 800; // Hz
-      oscillator.type = 'sine';
-
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.5);
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.connect(gain);
+      gain.connect(audioContext.destination);
+      osc.frequency.value = 800;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+      osc.start(audioContext.currentTime);
+      osc.stop(audioContext.currentTime + 0.5);
     };
 
-    // Show download complete notification
-    const showDownloadNotification = (videoTitle) => {
+    const showDownloadNotification = (title) => {
       if (!notifyPrefs.enabled) return;
-
-      // Play sound first
       playNotificationSound();
-
-      // Show browser notification
       if ('Notification' in window && Notification.permission === 'granted') {
-        const notification = new Notification('Download Complete! 🎉', {
-          body: videoTitle || 'Your video has finished downloading.',
+        const n = new Notification('Download Complete 🎉', {
+          body: title || 'Your file has finished downloading.',
           icon: '/static/image/YTDownloadX.png',
           badge: '/static/image/YTDownloadX.png',
           tag: 'download-complete',
-          requireInteraction: false
         });
-
-        // Focus window when notification is clicked
-        notification.onclick = () => {
+        n.onclick = () => {
           window.focus();
-          notification.close();
+          n.close();
         };
-
-        // Auto-close after 5 seconds
-        setTimeout(() => notification.close(), 5000);
+        setTimeout(() => n.close(), 5000);
       }
     };
 
-    // Save notification preferences
     window.saveNotifyPrefs = (enabled, sound) => {
       notifyPrefs.enabled = enabled;
       notifyPrefs.sound = sound;
@@ -340,235 +330,336 @@
       localStorage.setItem('notifySound', sound);
     };
 
-    // ============================================
-    // END NOTIFICATION SYSTEM
-    // ============================================
+    // =====================================================
+    // FORMAT HELPERS
+    // =====================================================
+    const populateResolutionSelect = (selectEl, formats, isAudio = false) => {
+      selectEl.innerHTML = '';
+      const bestOpt = document.createElement('option');
+      bestOpt.value = 'best';
+      bestOpt.textContent = isAudio ? 'Best audio quality' : 'Best video quality';
+      selectEl.appendChild(bestOpt);
 
-    // Reset button functionality
-    d('#resetBtn').addEventListener('click', () => {
-      d('#url').value = '';
-      d('#metaSection').classList.add('d-none');
-      d('#progressArea').classList.add('d-none');
-      d('#videoMeta').classList.add('d-none');
-      d('#playlistMeta').classList.add('d-none');
-      d('#doneArea').classList.add('d-none');
-      d('#qrWrap').classList.add('d-none');
-      d('#progressBar').style.width = '0%';
-      d('#progressBar').textContent = '0%';
-      d('#progressBar').className = 'progress-bar';
-    });
+      if (!formats || !formats.length) return;
 
-    // Theme is fixed to dark mode
+      const filtered = formats.filter(f => {
+        if (isAudio) {
+          return f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none');
+        } else {
+          return f.vcodec && f.vcodec !== 'none';
+        }
+      });
 
-    // Optimized resolution options - only useful values
-    const getOptimizedResolutions = (availableResolutions) => {
-      const preferredResolutions = ['4320p', '2160p', '1440p', '1080p', '720p', '480p', '360p', '240p', '144p'];
-      const available = availableResolutions || [];
+      filtered.sort((a, b) => (b.height || 0) - (a.height || 0));
 
-      // Filter to only include resolutions that are both preferred and available
-      const filtered = preferredResolutions.filter(res =>
-        available.some(avail => avail.includes(res.replace('p', '')))
-      );
-
-      // If no matches, fall back to original available resolutions, but filter out very small ones
-      if (filtered.length === 0) {
-        return available.filter(res => {
-          const height = parseInt(res);
-          return height >= 144; // Only include 144p and above
-        });
-      }
-
-      return filtered;
+      filtered.forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = f.format_id;
+        if (isAudio) {
+          const kbps = f.tbr ? `${Math.round(f.tbr)}kbps` : '';
+          opt.textContent = `Audio ${f.ext?.toUpperCase() || ''} ${kbps}`.trim();
+        } else {
+          const res = f.resolution || (f.height ? `${f.height}p` : '');
+          const fps = f.fps ? `${f.fps}fps` : '';
+          opt.textContent = `${res} ${f.ext?.toUpperCase() || ''} ${fps}`.trim();
+        }
+        selectEl.appendChild(opt);
+      });
     };
 
-    const setVideoMeta = (v) => {
+    const setVideoMeta = (video) => {
       d('#videoMeta').classList.remove('d-none');
       d('#playlistMeta').classList.add('d-none');
-      d('#thumb').src = v.thumbnail || '';
-      d('#title').textContent = v.title || '';
-      d('#channel').textContent = v.channel ? `By ${v.channel}` : '';
-      d('#duration').textContent = v.duration ? `• ${secondsToHms(v.duration)}` : '';
-      const resSel = d('#resolution');
-      resSel.innerHTML = '';
-      const optimizedRes = getOptimizedResolutions(v.resolutions);
-      (optimizedRes.length > 0 ? optimizedRes : ['1080p', '720p', '480p', '360p']).forEach(r => {
-        const opt = document.createElement('option');
-        opt.value = r; opt.textContent = r; resSel.appendChild(opt);
-      });
-    }
 
-    const setPlaylistMeta = (pl) => {
+      d('#thumb').src = video.thumbnail || '/static/image/YTDownloadX.png';
+      d('#title').textContent = video.title || 'Unknown title';
+      d('#channel').textContent = video.uploader ? `By ${video.uploader}` : '';
+      d('#duration').textContent = video.duration ? `• ${secondsToHms(video.duration)}` : '';
+
+      populateResolutionSelect(d('#resolution'), video.formats, false);
+    };
+
+    const setPlaylistMeta = (playlist, formats) => {
       d('#videoMeta').classList.add('d-none');
       d('#playlistMeta').classList.remove('d-none');
+
+      d('#plTitle').textContent = playlist.title || 'Playlist';
+      d('#plSub').textContent = `${playlist.video_count || playlist.videos.length} videos • ${playlist.uploader || ''}`;
+
       const list = d('#playlistList');
       list.innerHTML = '';
-      const commonRes = new Set();
-      (pl.entries || []).forEach((e, idx) => {
-        (e.resolutions || []).forEach(r => commonRes.add(r));
+
+      playlist.videos.forEach(v => {
         const col = document.createElement('div');
         col.className = 'col';
         col.innerHTML = `
-      <div class="card h-100">
-        <img src="${e.thumbnail || ''}" class="card-img-top" alt="thumb">
-        <div class="card-body">
-          <h6 class="card-title">${e.title || ''}</h6>
-          <div class="form-check">
-            <input class="form-check-input sel" type="checkbox" value="${idx + 1}" id="v_${idx}">
-            <label class="form-check-label" for="v_${idx}">Select</label>
+          <div class="card h-100 playlist-item-card">
+            <div class="row g-0 h-100">
+              <div class="col-4">
+                <img src="${v.thumbnail || '/static/image/YTDownloadX.png'}" class="img-fluid rounded-start h-100 w-100 object-fit-cover" alt="thumb">
+              </div>
+              <div class="col-8">
+                <div class="card-body d-flex flex-column">
+                  <h6 class="card-title mb-1 text-truncate" title="${v.title || ''}">${v.title || ''}</h6>
+                  <small class="text-secondary mb-1">${v.uploader || ''}</small>
+                  <small class="text-secondary mb-2">${secondsToHms(v.duration) || ''}</small>
+                  <div class="mt-auto form-check">
+                    <input class="form-check-input sel" type="checkbox"
+                      data-url="${v.url}" data-title="${v.title || ''}">
+                    <label class="form-check-label small">Select</label>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>`;
+        `;
         list.appendChild(col);
       });
-      const resSel = d('#plResolution');
-      resSel.innerHTML = '';
-      const allResolutions = Array.from(commonRes);
-      const optimizedRes = getOptimizedResolutions(allResolutions);
-      const sortedRes = (optimizedRes.length > 0 ? optimizedRes : allResolutions.filter(r => parseInt(r) >= 144))
-        .sort((a, b) => parseInt(b) - parseInt(a)); // Sort descending (highest quality first)
-      (sortedRes.length > 0 ? sortedRes : ['1080p', '720p', '480p', '360p']).forEach(r => {
-        const opt = document.createElement('option'); opt.value = r; opt.textContent = r; resSel.appendChild(opt);
-      });
-      d('#selectAll').checked = false;
-    }
 
-    let lastMeta = null;
+      populateResolutionSelect(d('#plResolution'), formats || [], false);
+    };
 
-    d('#fetchBtn').addEventListener('click', async () => {
-      const url = d('#url').value.trim();
-      if (!url) { alert('Enter a URL'); return; }
-      // loading state
-      const btn = d('#fetchBtn');
-      btn.disabled = true; btn.querySelector('.fetch-text').classList.add('d-none'); btn.querySelector('.spinner-border').classList.remove('d-none');
-      const res = await fetch('/api/metadata', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
-      const data = await res.json();
-      btn.disabled = false; btn.querySelector('.fetch-text').classList.remove('d-none'); btn.querySelector('.spinner-border').classList.add('d-none');
-      if (data.error) { alert(data.error); return; }
-      lastMeta = data;
-      d('#metaSection').classList.remove('d-none');
-      if (data.type === 'video') setVideoMeta(data.video);
-      else setPlaylistMeta(data);
+    // =====================================================
+    // PROGRESS + DOWNLOAD
+    // =====================================================
+    const setProgress = (pct, label) => {
+      const area = d('#progressArea');
+      const bar = d('#progressBar');
+      area.classList.remove('d-none');
+      bar.style.width = `${pct}%`;
+      bar.textContent = `${pct}%`;
+      if (label) d('#currentFile').textContent = label;
+    };
+
+    const resetProgress = () => {
+      d('#progressBar').className = 'progress-bar';
+      setProgress(0, 'Preparing download...');
+      d('#doneArea').classList.add('d-none');
+      d('#qrWrap').classList.add('d-none');
+      d('#playlistProgress').classList.add('d-none');
+      d('#eta').textContent = '';
+    };
+
+    const startDownloadWithUI = async ({ url, kind, format_id, title, index, total }) => {
+      if (!url) return;
+
+      const btn = kind === 'playlist'
+        ? d('#plDownloadBtn')
+        : d('#downloadBtn');
+
+      const labelTitle = title || 'Downloading...';
+
+      resetProgress();
+      d('#progressArea').classList.remove('d-none');
+      d('#currentFile').textContent = labelTitle;
+
+      if (total && total > 1) {
+        d('#playlistProgress').classList.remove('d-none');
+        d('#totalVideos').textContent = total;
+        d('#currentVideo').textContent = index;
+      }
+
+      // auto-scroll so user sees progress
+      d('#progressArea').scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Starting download...';
+
+      try {
+        setProgress(5, 'Contacting server...');
+        const res = await fetch('/api/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url,
+            kind: kind === 'mp3' ? 'mp3' : 'mp4',
+            format_id: format_id || 'best',
+          }),
+        });
+
+        if (!res.ok) {
+          let errMsg = `Download failed with status ${res.status}`;
+          try {
+            const errData = await res.json();
+            if (errData && errData.message) errMsg = errData.message;
+          } catch (e) { /* ignore */ }
+          throw new Error(errMsg);
+        }
+
+        setProgress(35, 'Downloading...');
+        const downloadId = res.headers.get('X-Download-Id') || '';
+        const contentDisp = res.headers.get('Content-Disposition') || '';
+        let filename = 'download';
+
+        const m = contentDisp.match(/filename="?([^"]+)"?/i);
+        if (m && m[1]) filename = m[1];
+
+        const blob = await res.blob();
+        setProgress(70, 'Finishing...');
+
+        const blobUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(blobUrl);
+
+        setProgress(100, 'Download completed!');
+        d('#progressBar').classList.add('bg-success');
+        d('#doneArea').classList.remove('d-none');
+        d('#doneHint').textContent = `Saved as: ${filename}`;
+
+        // QR for mobile
+        if (downloadId) {
+          const fileUrl = `${window.location.origin}/files/${downloadId}`;
+          d('#qr').src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(fileUrl)}`;
+          d('#qrWrap').classList.remove('d-none');
+        }
+
+        showDownloadNotification(filename);
+      } catch (err) {
+        console.error('Download error:', err);
+        d('#progressBar').classList.add('bg-danger');
+        d('#currentFile').textContent = `Download failed: ${err.message}`;
+        alert(`Download failed: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    };
+
+    // =====================================================
+    // EVENT HANDLERS
+    // =====================================================
+
+    // Reset button
+    d('#resetBtn').addEventListener('click', () => {
+      d('#url').value = '';
+      d('#metaSection').classList.add('d-none');
+      d('#videoMeta').classList.add('d-none');
+      d('#playlistMeta').classList.add('d-none');
+      d('#progressArea').classList.add('d-none');
+      d('#doneArea').classList.add('d-none');
+      d('#qrWrap').classList.add('d-none');
+      d('#playlistList').innerHTML = '';
+      d('#plSub').textContent = '';
+      d('#plTitle').textContent = 'Playlist Videos';
+      resetProgress();
     });
 
-    // Playlist select all
+    // Metadata fetch
+    d('#fetchBtn').addEventListener('click', async () => {
+      const url = d('#url').value.trim();
+      if (!url) {
+        alert('Please enter a YouTube URL');
+        return;
+      }
+      if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+        alert('Please enter a valid YouTube URL');
+        return;
+      }
+
+      const btn = d('#fetchBtn');
+      btn.disabled = true;
+      btn.querySelector('.fetch-text').classList.add('d-none');
+      btn.querySelector('.spinner-border').classList.remove('d-none');
+
+      try {
+        const res = await fetch('/api/metadata', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+          throw new Error(data.message || data.error || 'Failed to fetch info');
+        }
+
+        d('#metaSection').classList.remove('d-none');
+
+        if (data.kind === 'playlist') {
+          setPlaylistMeta(data.playlist, data.formats || []);
+        } else {
+          setVideoMeta(data.video);
+        }
+      } catch (err) {
+        console.error('Metadata error:', err);
+        alert(`Error: ${err.message}\n\nPlease check that the URL is correct and try again.`);
+      } finally {
+        btn.disabled = false;
+        btn.querySelector('.fetch-text').classList.remove('d-none');
+        btn.querySelector('.spinner-border').classList.add('d-none');
+      }
+    });
+
+    // Select all in playlist
     d('#selectAll').addEventListener('change', (e) => {
       dd('.sel').forEach(cb => cb.checked = e.target.checked);
     });
 
-    // Start single video download
+    // Single video download
     d('#downloadBtn').addEventListener('click', async () => {
       const url = d('#url').value.trim();
+      if (!url) {
+        alert('Please enter a URL first');
+        return;
+      }
       const kind = d('#format').value;
-      const resolution = d('#resolution').value;
-      await startDownload({ url, kind, resolution });
+      const formatId = d('#resolution').value || 'best';
+      const title = d('#title').textContent || 'Video';
+
+      await startDownloadWithUI({
+        url,
+        kind,
+        format_id: formatId,
+        title,
+        index: 1,
+        total: 1,
+      });
     });
 
-    // Start playlist download
+    // Playlist download (selected)
     d('#plDownloadBtn').addEventListener('click', async () => {
       const url = d('#url').value.trim();
-      const kind = d('#plFormat').value;
-      const resolution = d('#plResolution').value;
-      const selection_ids = Array.from(dd('.sel')).filter(cb => cb.checked).map(cb => parseInt(cb.value));
-      if (selection_ids.length === 0) { alert('Select at least one video'); return; }
+      if (!url) {
+        alert('Please enter a URL first');
+        return;
+      }
+      const selected = Array.from(dd('.sel')).filter(cb => cb.checked);
+      if (selected.length === 0) {
+        alert('Select at least one video from the playlist');
+        return;
+      }
 
-      // Show playlist progress counter
-      d('#playlistProgress').classList.remove('d-none');
-      d('#totalVideos').textContent = selection_ids.length;
-      d('#currentVideo').textContent = '1';
+      const kindSel = d('#plFormat').value;
+      const resSel = d('#plResolution').value || 'best';
 
-      await startDownload({ url, kind, resolution, selection_ids });
+      for (let i = 0; i < selected.length; i++) {
+        const cb = selected[i];
+        const vidUrl = cb.dataset.url;
+        const title = cb.dataset.title || `Video ${i + 1}`;
+        await startDownloadWithUI({
+          url: vidUrl,
+          kind: kindSel,
+          format_id: resSel,
+          title,
+          index: i + 1,
+          total: selected.length,
+        });
+      }
     });
 
-    async function startDownload(payload) {
-      const res = await fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const data = await res.json();
-      if (data.error) { alert(data.error); return; }
-      d('#progressArea').classList.remove('d-none');
-      pollProgress(data.job_id);
-    }
-
-    async function pollProgress(jobId) {
-      const bar = d('#progressBar');
-      const file = d('#currentFile');
-      const eta = d('#eta');
-      const qrWrap = d('#qrWrap');
-      const qr = d('#qr');
-      const doneArea = d('#doneArea');
-      const downloadLink = d('#downloadLink');
-      const playlistProgress = d('#playlistProgress');
-      const currentVideo = d('#currentVideo');
-      const itemsProgress = d('#itemsProgress');
-      const doneHint = d('#doneHint');
-
-      const iv = setInterval(async () => {
-        const res = await fetch(`/api/progress/${jobId}`);
-        const data = await res.json();
-        if (data.error) { clearInterval(iv); alert(data.error); return; }
-
-        const pct = Math.floor(data.progress || 0);  // Progress already in 0-100 range
-        bar.style.width = pct + '%'; bar.textContent = pct + '%';
-        file.textContent = data.filename || 'Working...';
-        eta.textContent = data.eta ? `ETA ${data.eta}s` : '';
-
-        // Render per-item progress if provided
-        if (Array.isArray(data.items) && data.items.length > 0) {
-          itemsProgress.classList.remove('d-none');
-          itemsProgress.innerHTML = '';
-          data.items.forEach(it => {
-            const ipct = typeof it.progress === 'number' ? it.progress : 0;
-            const row = document.createElement('div');
-            row.className = 'mb-2';
-            row.innerHTML = `
-          <div class="d-flex justify-content-between small mb-1">
-            <span>${it.title || `Item ${it.index}`}</span>
-            <span>${Math.floor(ipct)}%</span>
-          </div>
-          <div class="progress" style="height: 8px;">
-            <div class="progress-bar" style="width:${Math.floor(ipct)}%"></div>
-          </div>`;
-            itemsProgress.appendChild(row);
-          });
-        }
-
-        // Update playlist count text if available
-        if (data.total_videos) {
-          playlistProgress.classList.remove('d-none');
-          d('#totalVideos').textContent = data.total_videos;
-          // current_video is approximated by number of items with status completed/processing
-          const doneCount = (data.items || []).filter(it => it.status === 'processing' || it.progress === 100).length;
-          currentVideo.textContent = Math.min(doneCount + 1, data.total_videos);
-        }
-
-        if (data.status === 'completed') {
-          clearInterval(iv);
-          bar.classList.add('bg-success');
-
-          // ✨ Show notification when download completes
-          showDownloadNotification(data.filename || 'Your video');
-
-          if (data.download_url) {
-            doneArea.classList.remove('d-none');
-            downloadLink.href = data.download_url;
-            if (String(data.filename || '').endsWith('.zip')) {
-              downloadLink.textContent = 'Download ZIP';
-              doneHint.textContent = 'Extract after download to get all videos.';
-            } else {
-              downloadLink.textContent = 'Download file';
-              doneHint.textContent = '';
-            }
-          }
-          if (data.qr) {
-            qrWrap.classList.remove('d-none');
-            qr.src = data.qr;
-          }
-        }
-        if (data.status === 'error') {
-          clearInterval(iv);
-          bar.classList.add('bg-danger');
-          alert(data.error || 'Error');
-        }
-      }, 1000);
-    }
+    // (Optional) you could attach a click handler to #notifySettingsBtn
+    // to open some small modal or just toggle prefs. For now it just toggles.
+    d('#notifySettingsBtn').addEventListener('click', () => {
+      const newEnabled = !notifyPrefs.enabled;
+      saveNotifyPrefs(newEnabled, notifyPrefs.sound);
+      alert(`Desktop notifications are now ${newEnabled ? 'enabled' : 'disabled'}.`);
+    });
   </script>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
