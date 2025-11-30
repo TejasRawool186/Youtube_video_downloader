@@ -77,13 +77,16 @@
 <div align="center">
 
 #### 🏠 Home Page
-<img src="https://via.placeholder.com/800x450/0a0520/9c6fff?text=YTDownloadX+Home+Page" alt="Home Page" width="700">
+<img width="1894" height="905" alt="Screenshot 2025-11-30 131515" src="https://github.com/user-attachments/assets/006f795c-db4e-4410-94fb-79445a308b0e" />
+
 
 #### 📥 Download Interface
-<img src="https://via.placeholder.com/800x450/0a0520/4b8fff?text=Download+Interface" alt="Download Interface" width="700">
+<img width="1891" height="902" alt="image" src="https://github.com/user-attachments/assets/0ac04ead-8b88-463b-b9d0-510a31ed1d79" />
+
 
 #### 📋 Playlist Selection
-<img src="https://via.placeholder.com/800x450/0a0520/ff6fe9?text=Playlist+Selection" alt="Playlist Selection" width="700">
+<img width="1900" height="903" alt="Screenshot 2025-11-30 131459" src="https://github.com/user-attachments/assets/852d195c-133b-4780-9890-8b3ebd94560c" />
+
 
 </div>
 
